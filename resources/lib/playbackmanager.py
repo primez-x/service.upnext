@@ -13,7 +13,7 @@ from upnext import UpNext
 from utils import addon_path, calculate_progress_steps, clear_property, event, get_setting_bool, get_setting_int, log as ulog, set_property
 
 
-class PlaybackManager:
+class PlaybackManager(object):
     _shared_state = {}
 
     def __init__(self):
@@ -120,23 +120,26 @@ class PlaybackManager:
         self.log('playing media episode', 2)
         # Signal to trakt previous episode watched
         event(message='NEXTUPWATCHEDSIGNAL', data={'episodeid': self.state.current_episode_id}, encoding='base64')
-        if source == 'playlist' or queued:
-            # Play playlist media
-            if should_play_non_default:
-                # Only start the next episode if the user asked for it specifically
-                self.player.playnext()
-        elif self.api.has_addon_data():
-            # Play add-on media
-            self.api.play_addon_item()
-        else:
-            # Play local media
-            self.api.play_kodi_item(episode)
+        self._play_episode(episode, source, queued)
 
         # play_next = True
         # keep_playing = True
         # return play_next, keep_playing
         # Play next file, and keep playing current file
         return True, True
+
+    def _play_episode(self, episode, source, queued):
+        if source == 'playlist' or queued:
+            # Playback has already been approved above. Explicitly advance the
+            # playlist for both Watch Now and an expired automatic countdown;
+            # Kodi does not reliably auto-advance queued watched episodes.
+            self.player.playnext()
+        elif self.api.has_addon_data():
+            # Play add-on media
+            self.api.play_addon_item()
+        else:
+            # Play local media
+            self.api.play_kodi_item(episode)
 
     def show_popup_and_wait(self, episode, next_up_page, still_watching_page):
         try:
