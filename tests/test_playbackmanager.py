@@ -40,17 +40,40 @@ def manager_with_recorders(has_addon_data=False):
 def test_queued_episode_explicitly_advances_after_automatic_countdown():
     manager = manager_with_recorders()
 
-    manager._play_episode({'episodeid': 2}, source=None, queued=True)
+    manager._play_episode(
+        {'episodeid': 2},
+        source=None,
+        queued=True,
+        advance_playlist=True,
+    )
 
     assert manager.player.playnext_calls == 1
     assert manager.api.addon_items_played == 0
     assert manager.api.kodi_items_played == []
 
 
-def test_existing_playlist_explicitly_advances_after_automatic_countdown():
+def test_unwatched_queued_episode_keeps_kodi_end_of_stream_autoplay():
     manager = manager_with_recorders()
 
-    manager._play_episode({'episodeid': 2}, source='playlist', queued=False)
+    manager._play_episode(
+        {'episodeid': 2},
+        source=None,
+        queued=True,
+        advance_playlist=False,
+    )
+
+    assert manager.player.playnext_calls == 0
+
+
+def test_existing_playlist_explicitly_advances_when_requested():
+    manager = manager_with_recorders()
+
+    manager._play_episode(
+        {'episodeid': 2},
+        source='playlist',
+        queued=False,
+        advance_playlist=True,
+    )
 
     assert manager.player.playnext_calls == 1
 
@@ -58,7 +81,12 @@ def test_existing_playlist_explicitly_advances_after_automatic_countdown():
 def test_addon_episode_uses_addon_playback_when_not_queued():
     manager = manager_with_recorders(has_addon_data=True)
 
-    manager._play_episode({'episodeid': 2}, source=None, queued=False)
+    manager._play_episode(
+        {'episodeid': 2},
+        source=None,
+        queued=False,
+        advance_playlist=False,
+    )
 
     assert manager.player.playnext_calls == 0
     assert manager.api.addon_items_played == 1
@@ -68,7 +96,12 @@ def test_local_episode_uses_kodi_playback_when_not_queued():
     manager = manager_with_recorders()
     episode = {'episodeid': 2}
 
-    manager._play_episode(episode, source=None, queued=False)
+    manager._play_episode(
+        episode,
+        source=None,
+        queued=False,
+        advance_playlist=False,
+    )
 
     assert manager.player.playnext_calls == 0
     assert manager.api.kodi_items_played == [episode]

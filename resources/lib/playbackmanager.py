@@ -120,7 +120,12 @@ class PlaybackManager(object):
         self.log('playing media episode', 2)
         # Signal to trakt previous episode watched
         event(message='NEXTUPWATCHEDSIGNAL', data={'episodeid': self.state.current_episode_id}, encoding='base64')
-        self._play_episode(episode, source, queued)
+        self._play_episode(
+            episode,
+            source,
+            queued,
+            should_play_non_default or not no_play_count,
+        )
 
         # play_next = True
         # keep_playing = True
@@ -128,12 +133,12 @@ class PlaybackManager(object):
         # Play next file, and keep playing current file
         return True, True
 
-    def _play_episode(self, episode, source, queued):
+    def _play_episode(self, episode, source, queued, advance_playlist):
         if source == 'playlist' or queued:
-            # Playback has already been approved above. Explicitly advance the
-            # playlist for both Watch Now and an expired automatic countdown;
-            # Kodi does not reliably auto-advance queued watched episodes.
-            self.player.playnext()
+            # Watch Now must advance immediately. At natural end Kodi normally
+            # advances unwatched items itself, but drops queued watched items.
+            if advance_playlist:
+                self.player.playnext()
         elif self.api.has_addon_data():
             # Play add-on media
             self.api.play_addon_item()
