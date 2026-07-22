@@ -124,7 +124,8 @@ class PlaybackManager(object):
             episode,
             source,
             queued,
-            should_play_non_default or not no_play_count,
+            explicit_advance=should_play_non_default,
+            watched_episode=not no_play_count,
         )
 
         # play_next = True
@@ -133,17 +134,54 @@ class PlaybackManager(object):
         # Play next file, and keep playing current file
         return True, True
 
-    def _play_episode(self, episode, source, queued, advance_playlist):
+    def _play_episode(self, episode, source, queued, explicit_advance, watched_episode):
         if source == 'playlist' or queued:
-            # Watch Now must advance immediately. At natural end Kodi normally
-            # advances unwatched items itself, but drops queued watched items.
-            if advance_playlist:
+            if explicit_advance:
+                # Watch Now advances immediately.
                 self.player.playnext()
+            elif watched_episode:
+                # Kodi drops queued watched items at end of stream. Wait until
+                # the current stream has fully closed before starting the next
+                # episode so its EOF teardown cannot close the new playback.
+                self._play_watched_episode_after_end(episode, queued)
         elif self.api.has_addon_data():
             # Play add-on media
             self.api.play_addon_item()
         else:
             # Play local media
+            self.api.play_kodi_item(episode)
+
+    def _play_watched_episode_after_end(self, episode, queued):
+        self.log('Waiting for watched episode end-of-stream handoff', 0)
+        self.state.playing_next = True
+        if queued:
+            self.state.queued = self.api.dequeue_next_item()
+
+        try:
+            current_file = self.player.getPlayingFile()
+        except RuntimeError:
+            current_file = None
+
+        for _ in range(60):
+            if not self.player.isPlaying():
+                # Allow a native playlist transition to appear before taking
+                # over; Kodi can briefly report no active player between files.
+                sleep(250)
+                if not self.player.isPlaying():
+                    break
+            if current_file:
+                try:
+                    if self.player.getPlayingFile() != current_file:
+                        self.log('Kodi completed watched episode handoff natively', 0)
+                        return
+                except RuntimeError:
+                    break
+            sleep(50)
+
+        self.log('Starting watched next episode after end of stream', 0)
+        if self.api.has_addon_data():
+            self.api.play_addon_item()
+        else:
             self.api.play_kodi_item(episode)
 
     def show_popup_and_wait(self, episode, next_up_page, still_watching_page):
