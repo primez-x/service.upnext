@@ -6,7 +6,7 @@ from xbmc import sleep, PLAYLIST_VIDEO, PLAYLIST_MUSIC
 from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, log as ulog
 
 
-class Api:
+class Api:  # pylint: disable=too-many-public-methods
     """Main API class"""
     _shared_state = {}
 
@@ -168,7 +168,15 @@ class Api:
             self.log('Playing the next episode directly: %(play_url)s' % self.data, 2)
             jsonrpc(method='Player.Open', params={'item': {'file': self.data.get('play_url')}})
         else:
-            self.log('Sending %(encoding)s data to add-on to play: %(play_info)s' % dict(encoding=self.encoding, **self.data), 2)  # pylint: disable=use-dict-literal
+            play_data = dict(  # pylint: disable=use-dict-literal
+                encoding=self.encoding,
+                **self.data
+            )
+            self.log(
+                'Sending %(encoding)s data to add-on to play: %(play_info)s'
+                % play_data,
+                2,
+            )
             event(message=self.data.get('id'), data=self.data.get('play_info'), sender='upnextprovider', encoding=self.encoding)
 
     def handle_addon_lookup_of_next_episode(self):
@@ -206,6 +214,22 @@ class Api:
 
         # Use one global default, regardless of episode length
         return get_setting_int('autoPlaySeasonTime')
+
+    def notification_duration(self):
+        """Return a provider-requested bounded popup duration, if any."""
+        duration = self.data.get('notification_duration')
+        if duration is None:
+            return None
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            self.log('Ignoring invalid notification duration: %s' % duration, 1)
+            return None
+        if duration <= 0:
+            return None
+        # Keep a malformed provider payload from recreating a multi-minute
+        # overlay. Native notifications do not send this field.
+        return min(duration, 60)
 
     def get_now_playing(self):
         # Seems to work too fast loop whilst waiting for it to become active

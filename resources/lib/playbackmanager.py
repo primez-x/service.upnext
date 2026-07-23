@@ -63,7 +63,7 @@ class PlaybackManager(object):
 
         self.api.reset_addon_data()
 
-    def launch_popup(self, episode, source=None):
+    def launch_popup(self, episode, source=None):  # pylint: disable=too-many-locals
         episode_id = episode.get('episodeid')
         no_play_count = episode.get('playcount') is None or episode.get('playcount') == 0
         include_play_count = True if self.state.include_watched else no_play_count
@@ -88,9 +88,12 @@ class PlaybackManager(object):
             next_up_page = UpNext('script-upnext-upnext.xml', addon_path(), 'default', '1080i')
             still_watching_page = StillWatching('script-upnext-stillwatching.xml', addon_path(), 'default', '1080i')
 
-        showing_next_up_page, showing_still_watching_page = self.show_popup_and_wait(episode,
-                                                                                     next_up_page,
-                                                                                     still_watching_page)
+        (showing_next_up_page,
+         showing_still_watching_page,
+         countdown_expired) = self.show_popup_and_wait(
+             episode,
+             next_up_page,
+             still_watching_page)
         should_play_default, should_play_non_default = self.extract_play_info(next_up_page,
                                                                               showing_next_up_page,
                                                                               showing_still_watching_page,
@@ -107,6 +110,10 @@ class PlaybackManager(object):
         play_item_option_1 = (should_play_default and self.state.play_mode == 0)
         play_item_option_2 = (should_play_non_default and self.state.play_mode == 1)
         if not play_item_option_1 and not play_item_option_2:
+            if countdown_expired:
+                # Ask-mode users did not choose Watch Now. Close the bounded
+                # prompt but let the current episode continue through credits.
+                return False, True
             # play_next = False
             # keep_playing = next_up_page.is_cancel() if showing_next_up_page else still_watching_page.is_cancel()
             # keep_playing = keep_playing and not get_setting_bool('stopAfterClose')
@@ -124,7 +131,7 @@ class PlaybackManager(object):
             episode,
             source,
             queued,
-            explicit_advance=should_play_non_default,
+            explicit_advance=should_play_non_default or countdown_expired,
             watched_episode=not no_play_count,
         )
 
@@ -184,18 +191,15 @@ class PlaybackManager(object):
         else:
             self.api.play_kodi_item(episode)
 
-    def show_popup_and_wait(self, episode, next_up_page, still_watching_page):
+    def show_popup_and_wait(self, episode, next_up_page, still_watching_page):  # pylint: disable=too-many-locals,too-many-branches
         try:
             play_time = self.player.getTime()
             total_time = self.player.getTotalTime()
         except RuntimeError:
             self.log('exit early because player is no longer running', 2)
-            return False, False
-        progress_step_size = calculate_progress_steps(total_time - play_time)
+            return False, False, False
         next_up_page.set_item(episode)
-        next_up_page.set_progress_step_size(progress_step_size)
         still_watching_page.set_item(episode)
-        still_watching_page.set_progress_step_size(progress_step_size)
         played_in_a_row_number = get_setting_int('playedInARow')
         self.log('played in a row settings %s' % played_in_a_row_number, 2)
         self.log('played in a row %s' % self.state.played_in_a_row, 2)
@@ -211,6 +215,27 @@ class PlaybackManager(object):
             still_watching_page.show()
             set_property('service.upnext.dialog', 'true')
             showing_still_watching_page = True
+
+        notification_duration = (
+            self.api.notification_duration()
+            if showing_next_up_page else None
+        )
+        if notification_duration is not None:
+            self.log(
+                'Using provider countdown of %ss from playback position %.3fs'
+                % (notification_duration, play_time),
+                0,
+            )
+        progress_period = (
+            min(notification_duration, total_time - play_time)
+            if notification_duration is not None
+            else total_time - play_time
+        )
+        progress_step_size = calculate_progress_steps(progress_period)
+        next_up_page.set_progress_step_size(progress_step_size)
+        still_watching_page.set_progress_step_size(progress_step_size)
+        countdown_start_time = play_time
+        countdown_expired = False
         while (self.player.isPlaying() and (total_time - play_time > 1)
                and not next_up_page.is_cancel() and not next_up_page.is_watch_now()
                and not still_watching_page.is_still_watching() and not still_watching_page.is_cancel()):
@@ -226,7 +251,15 @@ class PlaybackManager(object):
                     showing_still_watching_page = False
                 break
 
-            remaining = total_time - play_time
+            if notification_duration is not None:
+                elapsed = max(0, play_time - countdown_start_time)
+                remaining = max(0, notification_duration - elapsed)
+                if remaining <= 0:
+                    self.log('Provider countdown expired; advancing now', 0)
+                    countdown_expired = True
+                    break
+            else:
+                remaining = total_time - play_time
             runtime = episode.get('runtime')
             if not self.state.pause:
                 if showing_next_up_page:
@@ -234,7 +267,9 @@ class PlaybackManager(object):
                 elif showing_still_watching_page:
                     still_watching_page.update_progress_control(remaining=remaining, runtime=runtime)
             sleep(100)
-        return showing_next_up_page, showing_still_watching_page
+        return (showing_next_up_page,
+                showing_still_watching_page,
+                countdown_expired)
 
     def extract_play_info(self, next_up_page, showing_next_up_page, showing_still_watching_page, still_watching_page):
         if showing_next_up_page:
