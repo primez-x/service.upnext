@@ -43,7 +43,7 @@ class PlayItem:
         # Next video from addon data
         if has_addon_data:
             episode = self.api.handle_addon_lookup_of_next_episode()
-            current_episode = self.api.handle_addon_lookup_of_current_episode()
+            current_episode = self.api.handle_addon_lookup_of_current_episode() or {}
             self.state.current_episode_id = current_episode.get('episodeid')
             if self.state.current_tv_show_id != current_episode.get('tvshowid'):
                 self.log('Change in TV show ID: last: %s / current: %s' % (self.state.current_tv_show_id, current_episode.get('tvshowid')), 2)
@@ -61,7 +61,9 @@ class PlayItem:
             current_file = self.player.get_last_file()
             # Get the active player
             result = self.api.get_now_playing()
-            self.handle_now_playing_result(result)
+            if not self.handle_now_playing_result(result):
+                self.log('Could not determine the playing library episode', 1)
+                return None, None
             # Get the next episode from Kodi
             episode = self.api.handle_kodi_lookup_of_episode(
                 self.state.tv_show_id, current_file, self.state.include_watched, self.state.current_episode_id
@@ -71,12 +73,13 @@ class PlayItem:
         return episode, source
 
     def handle_now_playing_result(self, result):
-        if not result.get('result'):
-            return
+        """Update state from Player.GetItem result. Return True when a library episode is playing"""
+        if not result or not result.get('result'):
+            return False
 
-        item = result.get('result').get('item')
+        item = result.get('result').get('item') or {}
         if item.get('type') != 'episode':
-            return
+            return False
 
         self.state.tv_show_id = item.get('tvshowid')
         if int(self.state.tv_show_id) == -1:
@@ -97,3 +100,4 @@ class PlayItem:
             self.log('Change in TV show ID: last: %s / current: %s' % (self.state.current_tv_show_id, self.state.tv_show_id), 2)
             self.state.current_tv_show_id = self.state.tv_show_id
             self.state.played_in_a_row = 1
+        return True

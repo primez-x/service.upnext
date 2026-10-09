@@ -2,7 +2,7 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-from xbmc import sleep, PLAYLIST_VIDEO, PLAYLIST_MUSIC
+from xbmc import sleep, Monitor, PLAYLIST_VIDEO, PLAYLIST_MUSIC
 from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, log as ulog
 
 
@@ -231,15 +231,23 @@ class Api:  # pylint: disable=too-many-public-methods
         # overlay. Native notifications do not send this field.
         return min(duration, 60)
 
-    def get_now_playing(self):
-        # Seems to work too fast loop whilst waiting for it to become active
+    def get_now_playing(self, max_tries=20):
+        """Return Player.GetItem details for the active player, or {} if none becomes active"""
+        # The player can take a moment to become active, so poll a bounded
+        # number of times instead of busy-looping forever.
+        monitor = Monitor()
         result = {}
-        while not result.get('result'):
-            result = jsonrpc(method='Player.GetActivePlayers')
+        for attempt in range(max_tries):
+            result = jsonrpc(method='Player.GetActivePlayers') or {}
             self.log('Got active player %s' % result, 2)
+            if result.get('result'):
+                break
+            if attempt < max_tries - 1 and monitor.waitForAbort(0.1):
+                return {}
 
         if not result.get('result'):
-            return None
+            self.log('No active player found after %d tries' % max_tries, 1)
+            return {}
 
         playerid = result.get('result')[0].get('playerid')
 
