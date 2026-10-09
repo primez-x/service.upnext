@@ -22,6 +22,16 @@ The add-on has various settings to fine-tune the experience, however the default
 
 For [Addon Integration](https://github.com/im85288/service.upnext/wiki/Integration) and [Skinners](https://github.com/im85288/service.upnext/wiki/Skinners) see the [wiki](https://github.com/im85288/service.upnext/wiki)
 
+## Running the tests
+The tests run outside Kodi against the stubs in `tests/` (including a minimal `AddonSignals` stub), they only need `pytest` and `polib`:
+
+```shell
+pip install pytest polib
+PYTHONPATH=resources/lib:tests python -m pytest -o addopts="" tests
+```
+
+`make test` additionally runs the tox/flake8, pylint and translation checks and needs the packages from `requirements.txt`.
+
 ## Releases
 
 ### v1.1.9 (2023-05-10)

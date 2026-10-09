@@ -21,9 +21,9 @@ class Api:  # pylint: disable=too-many-public-methods
         self.data = {}
         self.encoding = 'base64'
 
-    def log(self, msg, level=2):
+    def log(self, msg, level=2, *args):  # pylint: disable=keyword-arg-before-vararg
         """Log wrapper"""
-        ulog(msg, name=self.__class__.__name__, level=level)
+        ulog(msg, *args, name=self.__class__.__name__, level=level)
 
     def has_addon_data(self):
         return self.data
@@ -32,7 +32,7 @@ class Api:  # pylint: disable=too-many-public-methods
         self.data = {}
 
     def addon_data_received(self, data, encoding='base64'):
-        self.log('addon_data_received called with data %s' % data, 2)
+        self.log('addon_data_received called with data %s', 2, data)
         self.data = data
         self.encoding = encoding
 
@@ -160,35 +160,27 @@ class Api:  # pylint: disable=too-many-public-methods
         if get_int(item, 'episode') == -1:
             item['episode'] = ''
 
-        self.log('Next item in playlist: %s' % item, 2)
+        self.log('Next item in playlist: %s', 2, item)
         return item
 
     def play_addon_item(self):
         if self.data.get('play_url'):
-            self.log('Playing the next episode directly: %(play_url)s' % self.data, 2)
+            self.log('Playing the next episode directly: %(play_url)s', 2, self.data)
             jsonrpc(method='Player.Open', params={'item': {'file': self.data.get('play_url')}})
         else:
-            play_data = dict(  # pylint: disable=use-dict-literal
-                encoding=self.encoding,
-                **self.data
-            )
-            self.log(
-                'Sending %(encoding)s data to add-on to play: %(play_info)s'
-                % play_data,
-                2,
-            )
+            self.log('Sending %s data to add-on to play: %s', 2, self.encoding, self.data.get('play_info'))
             event(message=self.data.get('id'), data=self.data.get('play_info'), sender='upnextprovider', encoding=self.encoding)
 
     def handle_addon_lookup_of_next_episode(self):
         if not self.data:
             return None
-        self.log('handle_addon_lookup_of_next_episode episode returning data %(next_episode)s' % self.data, 2)
+        self.log('handle_addon_lookup_of_next_episode episode returning data %(next_episode)s', 2, self.data)
         return self.data.get('next_episode')
 
     def handle_addon_lookup_of_current_episode(self):
         if not self.data:
             return None
-        self.log('handle_addon_lookup_of_current episode returning data %(current_episode)s' % self.data, 2)
+        self.log('handle_addon_lookup_of_current episode returning data %(current_episode)s', 2, self.data)
         return self.data.get('current_episode')
 
     def notification_time(self, total_time=None):
@@ -201,19 +193,20 @@ class Api:  # pylint: disable=too-many-public-methods
             return total_time - int(self.data.get('notification_offset'))
 
         # Use a customized notification time, when configured
-        if total_time and get_setting_bool('customAutoPlayTime'):
+        # This is called every service tick, so the settings are cached per playback
+        if total_time and get_setting_bool('customAutoPlayTime', cache=True):
             if total_time > 60 * 60:
-                return get_setting_int('autoPlayTimeXL')
+                return get_setting_int('autoPlayTimeXL', cache=True)
             if total_time > 40 * 60:
-                return get_setting_int('autoPlayTimeL')
+                return get_setting_int('autoPlayTimeL', cache=True)
             if total_time > 20 * 60:
-                return get_setting_int('autoPlayTimeM')
+                return get_setting_int('autoPlayTimeM', cache=True)
             if total_time > 10 * 60:
-                return get_setting_int('autoPlayTimeS')
-            return get_setting_int('autoPlayTimeXS')
+                return get_setting_int('autoPlayTimeS', cache=True)
+            return get_setting_int('autoPlayTimeXS', cache=True)
 
         # Use one global default, regardless of episode length
-        return get_setting_int('autoPlaySeasonTime')
+        return get_setting_int('autoPlaySeasonTime', cache=True)
 
     def notification_duration(self):
         """Return a provider-requested bounded popup duration, if any."""
@@ -223,7 +216,7 @@ class Api:  # pylint: disable=too-many-public-methods
         try:
             duration = int(duration)
         except (TypeError, ValueError):
-            self.log('Ignoring invalid notification duration: %s' % duration, 1)
+            self.log('Ignoring invalid notification duration: %s', 1, duration)
             return None
         if duration <= 0:
             return None
@@ -239,14 +232,14 @@ class Api:  # pylint: disable=too-many-public-methods
         result = {}
         for attempt in range(max_tries):
             result = jsonrpc(method='Player.GetActivePlayers') or {}
-            self.log('Got active player %s' % result, 2)
+            self.log('Got active player %s', 2, result)
             if result.get('result'):
                 break
             if attempt < max_tries - 1 and monitor.waitForAbort(0.1):
                 return {}
 
         if not result.get('result'):
-            self.log('No active player found after %d tries' % max_tries, 1)
+            self.log('No active player found after %d tries', 1, max_tries)
             return {}
 
         playerid = result.get('result')[0].get('playerid')
@@ -257,7 +250,7 @@ class Api:  # pylint: disable=too-many-public-methods
             'playerid': playerid,
             'properties': ['episode', 'genre', 'playcount', 'plotoutline', 'season', 'showtitle', 'tvshowid'],
         })
-        self.log('Got details of now playing media %s' % result, 2)
+        self.log('Got details of now playing media %s', 2, result)
         return result
 
     def handle_kodi_lookup_of_episode(self, tvshowid, current_file, include_watched, current_episode_id):
@@ -272,7 +265,7 @@ class Api:  # pylint: disable=too-many-public-methods
         if not result.get('result'):
             return None
 
-        self.log('Got details of next up episode %s' % result, 2)
+        self.log('Got details of next up episode %s', 2, result)
         sleep(100)
 
         # Find the next unwatched and the newest added episodes
@@ -298,7 +291,7 @@ class Api:  # pylint: disable=too-many-public-methods
         for idx, episode in enumerate(episodes):
             # Find position of current episode
             if current_episode_id == episode.get('episodeid'):
-                self.log('Find current episode found episode in position: %d' % idx, 2)
+                self.log('Find current episode found episode in position: %d', 2, idx)
                 return episode
 
         # No next episode found

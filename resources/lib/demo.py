@@ -12,8 +12,8 @@ class DemoOverlay():
         self._demolabel = None
         self.log('initialized')
 
-    def log(self, msg, level=2):
-        ulog(msg, name=self.__class__.__name__, level=level)
+    def log(self, msg, level=2, *args):  # pylint: disable=keyword-arg-before-vararg
+        ulog(msg, *args, name=self.__class__.__name__, level=level)
 
     def show(self):
         if self._demolabel is not None:

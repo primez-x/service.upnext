@@ -12,20 +12,28 @@ from stillwatching import StillWatching
 from upnext import UpNext
 from utils import addon_path, calculate_progress_steps, clear_property, event, get_setting_bool, get_setting_int, log as ulog, set_property
 
+# Close the popup when playback moved back this many seconds before the notification time
+SEEK_BACK_GRACE = 5
+
 
 class PlaybackManager(object):
     _shared_state = {}
+    # Popup dialogs currently shown, see close_popup()
+    open_pages = ()
+    # Set by launch_popup() when Up Next has to be shown again for the current file
+    rearm = False
 
-    def __init__(self):
+    def __init__(self, player=None):
         self.__dict__ = self._shared_state
         self.api = Api()
-        self.play_item = PlayItem()
         self.state = State()
-        self.player = UpNextPlayer()
+        # Share the service's player: every xbmc.Player instance receives all player callbacks
+        self.player = player or UpNextPlayer()
+        self.play_item = PlayItem(player=self.player)
         self.demo = DemoOverlay(12005)
 
-    def log(self, msg, level=2):
-        ulog(msg, name=self.__class__.__name__, level=level)
+    def log(self, msg, level=2, *args):  # pylint: disable=keyword-arg-before-vararg
+        ulog(msg, *args, name=self.__class__.__name__, level=level)
 
     def handle_demo(self):
         if get_setting_bool('enableDemoMode'):
@@ -35,33 +43,51 @@ class PlaybackManager(object):
                 total_time = self.player.getTotalTime()
                 self.player.seekTime(total_time - 15)
             except RuntimeError as exc:
-                self.log('Failed to seekTime(): %s' % exc, 0)
+                self.log('Failed to seekTime(): %s', 0, exc)
         else:
             self.demo.hide()
 
     def launch_up_next(self):
+        """Show Up Next for the playing file, return True when it has to be shown again later"""
+        self.rearm = False
+        # Settings may have changed since the State was created
+        self.state.play_mode = get_setting_int('autoPlayMode')
+        self.state.include_watched = get_setting_bool('includeWatched')
         enable_playlist = get_setting_bool('enablePlaylist')
         episode, source = self.play_item.get_next()
-        self.log('Playlist setting: %s' % enable_playlist)
+        self.log('Playlist setting: %s', 2, enable_playlist)
         if source == 'playlist' and not enable_playlist:
             self.log('Playlist integration disabled', 2)
-            return
+            return False
         if not episode:
             # No episode get out of here
             self.log('Error: no episode could be found to play next...exiting', 1)
-            return
-        self.log('episode details %s' % episode, 2)
+            return False
+        self.log('episode details %s', 2, episode)
         play_next, keep_playing = self.launch_popup(episode, source)
-        self.state.playing_next = play_next
+        # When playing next, launch_popup() set playing_next before starting
+        # the next file. Don't set it again here: the handoff may already have
+        # been consumed (next file started) or cancelled (playback stopped).
+        if not play_next:
+            self.state.playing_next = False
 
         # Dequeue and stop playback if not playing next file
         if not play_next and self.state.queued:
             self.state.queued = self.api.dequeue_next_item()
+
+        if self.rearm:
+            # Keep tracking and the add-on data, the monitor shows Up Next again
+            # once playback reaches the notification time
+            self.log('Playback moved back before the notification time, Up Next will be shown again', 2)
+            self.state.last_file = None
+            return True
+
         if not keep_playing:
             self.log('Stopping playback', 2)
             self.player.stop()
 
         self.api.reset_addon_data()
+        return False
 
     def launch_popup(self, episode, source=None):  # pylint: disable=too-many-locals
         episode_id = episode.get('episodeid')
@@ -90,10 +116,15 @@ class PlaybackManager(object):
 
         (showing_next_up_page,
          showing_still_watching_page,
-         countdown_expired) = self.show_popup_and_wait(
+         countdown_expired,
+         seeked_back) = self.show_popup_and_wait(
              episode,
              next_up_page,
              still_watching_page)
+        if seeked_back:
+            # Don't play next file, keep playing current file and show Up Next again later
+            self.rearm = True
+            return False, True
         should_play_default, should_play_non_default = self.extract_play_info(next_up_page,
                                                                               showing_next_up_page,
                                                                               showing_still_watching_page,
@@ -127,6 +158,9 @@ class PlaybackManager(object):
         self.log('playing media episode', 2)
         # Signal to trakt previous episode watched
         event(message='NEXTUPWATCHEDSIGNAL', data={'episodeid': self.state.current_episode_id}, encoding='base64')
+        # Set before starting the next file, it is cleared when the next file
+        # starts (UpNextPlayer) or the state is reset (playback stopped/failed)
+        self.state.playing_next = True
         self._play_episode(
             episode,
             source,
@@ -206,27 +240,51 @@ class PlaybackManager(object):
         """Wait up to timeout seconds, return True when Kodi requests an abort"""
         return Monitor().waitForAbort(timeout)
 
-    def show_popup_and_wait(self, episode, next_up_page, still_watching_page):  # pylint: disable=too-many-locals,too-many-branches
+    def close_popup(self):
+        """Close the popup dialogs when shown and clear the dialog window property"""
+        pages, self.open_pages = self.open_pages, ()
+        for page in pages:
+            page.close()
+        clear_property('service.upnext.dialog')
+
+    def show_popup_and_wait(self, episode, next_up_page, still_watching_page):
+        """Show the popup and wait for the user or the end of playback
+
+        Return a tuple: (showing_next_up_page, showing_still_watching_page,
+        countdown_expired, seeked_back). When seeked_back is True playback
+        moved back before the notification time and the popup was closed.
+        """
+        try:
+            return self._show_popup_and_wait(episode, next_up_page, still_watching_page)
+        except BaseException:
+            # Never leave the popup covering playback after an unexpected error
+            self.close_popup()
+            raise
+
+    def _show_popup_and_wait(self, episode, next_up_page, still_watching_page):  # pylint: disable=too-many-locals,too-many-branches
         try:
             play_time = self.player.getTime()
             total_time = self.player.getTotalTime()
         except RuntimeError:
             self.log('exit early because player is no longer running', 2)
-            return False, False, False
+            return False, False, False, False
+        notification_time = self.api.notification_time(total_time=total_time)
         next_up_page.set_item(episode)
         still_watching_page.set_item(episode)
         played_in_a_row_number = get_setting_int('playedInARow')
-        self.log('played in a row settings %s' % played_in_a_row_number, 2)
-        self.log('played in a row %s' % self.state.played_in_a_row, 2)
+        self.log('played in a row settings %s', 2, played_in_a_row_number)
+        self.log('played in a row %s', 2, self.state.played_in_a_row)
         showing_next_up_page = False
         showing_still_watching_page = False
         if not played_in_a_row_number or int(self.state.played_in_a_row) < int(played_in_a_row_number):
-            self.log('showing next up page as played in a row is %s' % self.state.played_in_a_row, 2)
+            self.log('showing next up page as played in a row is %s', 2, self.state.played_in_a_row)
+            self.open_pages = (next_up_page,)
             next_up_page.show()
             set_property('service.upnext.dialog', 'true')
             showing_next_up_page = True
         else:
-            self.log('showing still watching page as played in a row %s' % self.state.played_in_a_row, 2)
+            self.log('showing still watching page as played in a row %s', 2, self.state.played_in_a_row)
+            self.open_pages = (still_watching_page,)
             still_watching_page.show()
             set_property('service.upnext.dialog', 'true')
             showing_still_watching_page = True
@@ -237,9 +295,8 @@ class PlaybackManager(object):
         )
         if notification_duration is not None:
             self.log(
-                'Using provider countdown of %ss from playback position %.3fs'
-                % (notification_duration, play_time),
-                0,
+                'Using provider countdown of %ss from playback position %.3fs',
+                0, notification_duration, play_time,
             )
         progress_period = (
             min(notification_duration, total_time - play_time)
@@ -251,6 +308,7 @@ class PlaybackManager(object):
         still_watching_page.set_progress_step_size(progress_step_size)
         countdown_start_time = play_time
         countdown_expired = False
+        seeked_back = False
         while (self.player.isPlaying() and (total_time - play_time > 1)
                and not next_up_page.is_cancel() and not next_up_page.is_watch_now()
                and not still_watching_page.is_still_watching() and not still_watching_page.is_cancel()):
@@ -258,12 +316,19 @@ class PlaybackManager(object):
                 play_time = self.player.getTime()
                 total_time = self.player.getTotalTime()
             except RuntimeError:
-                if showing_next_up_page:
-                    next_up_page.close()
-                    showing_next_up_page = False
-                if showing_still_watching_page:
-                    still_watching_page.close()
-                    showing_still_watching_page = False
+                self.close_popup()
+                showing_next_up_page = False
+                showing_still_watching_page = False
+                break
+
+            if total_time - play_time > notification_time + SEEK_BACK_GRACE:
+                # Playback moved back out of the notification window (e.g. the
+                # user rewinds): don't cover the episode, show Up Next again later
+                self.log('Playback moved back to %.3fs, closing popup', 0, play_time)
+                self.close_popup()
+                showing_next_up_page = False
+                showing_still_watching_page = False
+                seeked_back = True
                 break
 
             if notification_duration is not None:
@@ -284,9 +349,11 @@ class PlaybackManager(object):
             sleep(100)
         return (showing_next_up_page,
                 showing_still_watching_page,
-                countdown_expired)
+                countdown_expired,
+                seeked_back)
 
     def extract_play_info(self, next_up_page, showing_next_up_page, showing_still_watching_page, still_watching_page):
+        self.open_pages = ()
         if showing_next_up_page:
             next_up_page.close()
             should_play_default = not next_up_page.is_cancel()

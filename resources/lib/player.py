@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, unicode_literals
 from xbmc import getCondVisibility, Player, Monitor
 from api import Api
 from state import State
+from utils import clear_setting_cache
 
 
 class UpNextPlayer(Player):
@@ -44,10 +45,20 @@ class UpNextPlayer(Player):
             return
         self.state.track = True
 
+    def _playback_started(self):
+        """Handle the start of a new video or audio stream"""
+        # A pending Up Next handoff is consumed once the next file plays, so
+        # the end of this file must reset the state again (e.g. when it is a
+        # series finale for which no Up Next popup will reset it).
+        self.state.playing_next = False
+        # Settings read every service tick are cached per playback
+        clear_setting_cache()
+        self._check_video()
+
     if callable(getattr(Player, 'onAVStarted', None)):
         def onAVStarted(self):  # pylint: disable=invalid-name
             """Will be called when Kodi has a video or audiostream"""
-            self._check_video()
+            self._playback_started()
 
         def onPlayBackStarted(self):  # pylint: disable=invalid-name
             """Will be called when kodi starts playing a file"""
@@ -56,7 +67,7 @@ class UpNextPlayer(Player):
         def onPlayBackStarted(self):  # pylint: disable=invalid-name
             """Will be called when kodi starts playing a file"""
             self.reset_queue()
-            self._check_video()
+            self._playback_started()
 
     def onPlayBackPaused(self):  # pylint: disable=invalid-name
         self.state.pause = True
