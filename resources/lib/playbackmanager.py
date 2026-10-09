@@ -2,7 +2,7 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-from xbmc import sleep
+from xbmc import sleep, Monitor
 from api import Api
 from demo import DemoOverlay
 from player import UpNextPlayer
@@ -173,7 +173,8 @@ class PlaybackManager(object):
             if not self.player.isPlaying():
                 # Allow a native playlist transition to appear before taking
                 # over; Kodi can briefly report no active player between files.
-                sleep(250)
+                if self._wait_for_abort(0.25):
+                    return
                 if not self.player.isPlaying():
                     break
             if current_file:
@@ -183,13 +184,27 @@ class PlaybackManager(object):
                         return
                 except RuntimeError:
                     break
-            sleep(50)
+            if self._wait_for_abort(0.05):
+                return
+
+        # onPlayBackStopped/onPlayBackError reset the shared State (clearing
+        # playing_next) and the add-on data, whereas onPlayBackEnded keeps it
+        # while playing_next is set. Don't start the next episode when the
+        # user stopped playback or it failed while we were waiting.
+        if not self.state.playing_next:
+            self.log('Playback was stopped or failed; not starting watched next episode', 0)
+            return
 
         self.log('Starting watched next episode after end of stream', 0)
         if self.api.has_addon_data():
             self.api.play_addon_item()
         else:
             self.api.play_kodi_item(episode)
+
+    @staticmethod
+    def _wait_for_abort(timeout):
+        """Wait up to timeout seconds, return True when Kodi requests an abort"""
+        return Monitor().waitForAbort(timeout)
 
     def show_popup_and_wait(self, episode, next_up_page, still_watching_page):  # pylint: disable=too-many-locals,too-many-branches
         try:

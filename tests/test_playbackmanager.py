@@ -294,3 +294,151 @@ def test_provider_notification_duration_is_validated_and_capped():
     for configured, expected in cases:
         api.data = {'notification_duration': configured}
         assert api.notification_duration() == expected
+
+
+def test_watched_episode_handoff_bails_out_when_playback_was_stopped(
+        monkeypatch):
+    manager = manager_with_recorders(has_addon_data=True)
+
+    def stopped_while_waiting(timeout):
+        # onPlayBackStopped/onPlayBackError reset the shared State
+        manager.state.playing_next = False
+        return False
+
+    monkeypatch.setattr(manager, '_wait_for_abort', stopped_while_waiting)
+
+    manager._play_episode(
+        {'episodeid': 2},
+        source=None,
+        queued=True,
+        explicit_advance=False,
+        watched_episode=True,
+    )
+
+    assert manager.api.addon_items_played == 0
+    assert manager.api.kodi_items_played == []
+
+
+def test_watched_episode_handoff_bails_out_on_abort(monkeypatch):
+    manager = manager_with_recorders(has_addon_data=True)
+    monkeypatch.setattr(manager, '_wait_for_abort', lambda timeout: True)
+
+    manager._play_episode(
+        {'episodeid': 2},
+        source=None,
+        queued=True,
+        explicit_advance=False,
+        watched_episode=True,
+    )
+
+    assert manager.api.addon_items_played == 0
+    assert manager.api.kodi_items_played == []
+
+
+def test_get_now_playing_gives_up_when_no_player_becomes_active(monkeypatch):
+    import api as api_module
+    calls = []
+
+    def no_active_player(**kwargs):
+        calls.append(kwargs.get('method'))
+        return {'result': []}
+
+    class NoAbortMonitor:
+        def waitForAbort(self, timeout):
+            return False
+
+    monkeypatch.setattr(api_module, 'jsonrpc', no_active_player)
+    monkeypatch.setattr(api_module, 'Monitor', NoAbortMonitor)
+
+    assert Api().get_now_playing() == {}
+    assert calls == ['Player.GetActivePlayers'] * 20
+
+
+def test_get_now_playing_stops_polling_on_abort(monkeypatch):
+    import api as api_module
+    calls = []
+
+    def no_active_player(**kwargs):
+        calls.append(kwargs.get('method'))
+        return {'result': []}
+
+    class AbortMonitor:
+        def waitForAbort(self, timeout):
+            return True
+
+    monkeypatch.setattr(api_module, 'jsonrpc', no_active_player)
+    monkeypatch.setattr(api_module, 'Monitor', AbortMonitor)
+
+    assert Api().get_now_playing() == {}
+    assert calls == ['Player.GetActivePlayers']
+
+
+def test_get_next_bails_out_when_now_playing_is_unknown():
+    from playitem import PlayItem
+
+    play_item = PlayItem.__new__(PlayItem)
+    play_item.state = type('RecordingState', (object,), {})()
+    play_item.player = type('P', (object,), {'get_last_file': lambda self: 'a.mkv'})()
+    lookups = []
+    play_item.api = type('A', (object,), {
+        'has_addon_data': lambda self: None,
+        'get_now_playing': lambda self: {},
+        'handle_kodi_lookup_of_episode': lambda self, *args: lookups.append(args),
+    })()
+    play_item.get_playlist_position = lambda: False
+
+    assert play_item.get_next() == (None, None)
+    assert lookups == []
+
+
+def test_get_next_tolerates_missing_addon_current_episode():
+    from playitem import PlayItem
+
+    play_item = PlayItem.__new__(PlayItem)
+    play_item.state = type('RecordingState', (object,), {
+        'current_tv_show_id': None,
+    })()
+    play_item.api = type('A', (object,), {
+        'has_addon_data': lambda self: True,
+        'handle_addon_lookup_of_next_episode': lambda self: {'episodeid': 2},
+        'handle_addon_lookup_of_current_episode': lambda self: None,
+    })()
+    play_item.get_playlist_position = lambda: False
+
+    assert play_item.get_next() == ({'episodeid': 2}, 'addon')
+    assert play_item.state.current_episode_id is None
+
+
+def test_monitor_survives_unexpected_launch_errors(monkeypatch):
+    import monitor as monitor_module
+
+    service = monitor_module.UpNextMonitor.__new__(monitor_module.UpNextMonitor)
+    events = []
+    ticks = iter([False, False, True])
+
+    service.player = type('P', (object,), {
+        'disable_tracking': lambda self: events.append('disable'),
+        'reset_queue': lambda self: events.append('reset_queue'),
+    })()
+    service.api = type('A', (object,), {
+        'reset_addon_data': lambda self: events.append('reset_data'),
+    })()
+    service.playback_manager = type('M', (object,), {})()
+    service.playback_manager.demo = type('D', (object,), {
+        'hide': lambda self: events.append('hide'),
+    })()
+
+    def boom():
+        events.append('check')
+        raise ValueError('boom')
+
+    monkeypatch.setattr(service, 'abortRequested', lambda: False, raising=False)
+    monkeypatch.setattr(service, 'waitForAbort', lambda timeout: next(ticks), raising=False)
+    monkeypatch.setattr(service, '_check_playback', boom, raising=False)
+    monkeypatch.setattr(monitor_module, 'clear_property', lambda key: events.append('clear'))
+
+    service.run()
+
+    assert events.count('check') == 2
+    assert events.count('disable') == 2
+    assert events.count('reset_data') == 2
