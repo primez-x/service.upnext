@@ -8,7 +8,7 @@ from api import Api
 from playbackmanager import PlaybackManager
 from player import UpNextPlayer
 from statichelper import to_unicode
-from utils import clear_property, decode_json, get_property, get_setting_bool, kodi_version_major, log as ulog
+from utils import clear_setting_cache, decode_json, get_property, get_setting_bool, kodi_version_major, log as ulog
 
 
 class UpNextMonitor(Monitor):
@@ -16,14 +16,16 @@ class UpNextMonitor(Monitor):
 
     def __init__(self):
         """Constructor for Monitor"""
+        # Use a single player instance: every xbmc.Player instance receives
+        # (and handles) all player callbacks on the service thread
         self.player = UpNextPlayer()
         self.api = Api()
-        self.playback_manager = PlaybackManager()
+        self.playback_manager = PlaybackManager(player=self.player)
         Monitor.__init__(self)
 
-    def log(self, msg, level=1):
+    def log(self, msg, level=1, *args):  # pylint: disable=keyword-arg-before-vararg
         """Log wrapper"""
-        ulog(msg, name=self.__class__.__name__, level=level)
+        ulog(msg, *args, name=self.__class__.__name__, level=level)
 
     def run(self):
         """Main service loop"""
@@ -40,7 +42,7 @@ class UpNextMonitor(Monitor):
             except Exception:  # pylint: disable=broad-except
                 # Never let an unexpected error kill the service: log it,
                 # stop tracking the current playback and keep monitoring.
-                self.log('Unexpected error in service loop:\n%s' % format_exc(), 0)
+                self.log('Unexpected error in service loop:\n%s', 0, format_exc())
                 self._reset_after_error()
 
         self.log('Service stopped', 0)
@@ -49,13 +51,13 @@ class UpNextMonitor(Monitor):
         """Best-effort cleanup after an unexpected error in the service loop"""
         for cleanup in (self.player.disable_tracking,
                         self.playback_manager.demo.hide,
-                        lambda: clear_property('service.upnext.dialog'),
+                        self.playback_manager.close_popup,
                         self.player.reset_queue,
                         self.api.reset_addon_data):
             try:
                 cleanup()
             except Exception:  # pylint: disable=broad-except
-                self.log('Cleanup after error failed:\n%s' % format_exc(), 0)
+                self.log('Cleanup after error failed:\n%s', 0, format_exc())
 
     def _check_playback(self):  # pylint: disable=too-many-branches,too-many-return-statements
         """Check the current playback and launch Up Next when due"""
@@ -67,7 +69,7 @@ class UpNextMonitor(Monitor):
             self.playback_manager.demo.hide()
             return
 
-        if get_setting_bool('disableNextUp'):
+        if get_setting_bool('disableNextUp', cache=True):
             # Next Up is disabled
             self.player.disable_tracking()
             self.playback_manager.demo.hide()
@@ -130,10 +132,16 @@ class UpNextMonitor(Monitor):
             return
 
         self.player.set_last_file(current_file)
-        self.log('Show notification as episode (of length %d secs) ends in %d secs' % (total_time, notification_time), 2)
-        self.playback_manager.launch_up_next()
+        self.log('Show notification as episode (of length %d secs) ends in %d secs', 2, total_time, notification_time)
+        if self.playback_manager.launch_up_next():
+            # Playback moved back before the notification time, keep tracking
+            return
         self.log('Up Next style autoplay succeeded', 2)
         self.player.disable_tracking()
+
+    def onSettingsChanged(self):  # pylint: disable=invalid-name
+        """Settings changed event handler, re-read the cached settings"""
+        clear_setting_cache()
 
     def onNotification(self, sender, method, data):  # pylint: disable=invalid-name
         """Notification event handler for accepting data from add-ons"""
@@ -142,7 +150,7 @@ class UpNextMonitor(Monitor):
 
         decoded_data, encoding = decode_json(data)
         if decoded_data is None:
-            self.log('Received data from sender %s is not JSON: %s' % (sender, data), 2)
+            self.log('Received data from sender %s is not JSON: %s', 2, sender, data)
             return
 
         self.playback_manager.handle_demo()

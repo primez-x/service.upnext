@@ -24,9 +24,11 @@ class RecordingPlayer:
 
 
 class RecordingApi:
-    def __init__(self, has_addon_data=False, notification_duration=None):
+    def __init__(self, has_addon_data=False, notification_duration=None,
+                 notification_time=120):
         self._has_addon_data = has_addon_data
         self._notification_duration = notification_duration
+        self._notification_time = notification_time
         self.addon_items_played = 0
         self.dequeue_calls = 0
         self.kodi_items_played = []
@@ -52,13 +54,18 @@ class RecordingApi:
     def notification_duration(self):
         return self._notification_duration
 
+    def notification_time(self, total_time=None):
+        return self._notification_time
 
-def manager_with_recorders(has_addon_data=False, notification_duration=None):
+
+def manager_with_recorders(has_addon_data=False, notification_duration=None,
+                           notification_time=120):
     manager = PlaybackManager.__new__(PlaybackManager)
     manager.player = RecordingPlayer()
     manager.api = RecordingApi(
         has_addon_data=has_addon_data,
         notification_duration=notification_duration,
+        notification_time=notification_time,
     )
     manager.state = type('RecordingState', (object,), {
         'playing_next': False,
@@ -145,7 +152,7 @@ def test_launch_popup_treats_provider_countdown_expiry_as_explicit_advance(
     manager.state.track = True
     manager.state.play_mode = 0
     manager.show_popup_and_wait = (
-        lambda episode, next_page, still_page: (True, False, True)
+        lambda episode, next_page, still_page: (True, False, True, False)
     )
     manager.extract_play_info = (
         lambda next_page, showing_next, showing_still, still_page:
@@ -274,7 +281,7 @@ def test_provider_countdown_starts_at_popup_and_expires_after_ten_playback_secon
         still_watching_page,
     )
 
-    assert result == (True, False, True)
+    assert result == (True, False, True, False)
     assert next_up_page.shown is True
     assert still_watching_page.shown is False
     assert next_up_page.remaining_updates == [10, 8, 1]
@@ -423,7 +430,9 @@ def test_monitor_survives_unexpected_launch_errors(monkeypatch):
     service.api = type('A', (object,), {
         'reset_addon_data': lambda self: events.append('reset_data'),
     })()
-    service.playback_manager = type('M', (object,), {})()
+    service.playback_manager = type('M', (object,), {
+        'close_popup': lambda self: events.append('close_popup'),
+    })()
     service.playback_manager.demo = type('D', (object,), {
         'hide': lambda self: events.append('hide'),
     })()
@@ -435,10 +444,240 @@ def test_monitor_survives_unexpected_launch_errors(monkeypatch):
     monkeypatch.setattr(service, 'abortRequested', lambda: False, raising=False)
     monkeypatch.setattr(service, 'waitForAbort', lambda timeout: next(ticks), raising=False)
     monkeypatch.setattr(service, '_check_playback', boom, raising=False)
-    monkeypatch.setattr(monitor_module, 'clear_property', lambda key: events.append('clear'))
 
     service.run()
 
     assert events.count('check') == 2
     assert events.count('disable') == 2
+    assert events.count('close_popup') == 2
     assert events.count('reset_data') == 2
+
+
+class SeekablePlayer(TimedPlayer):
+    def __init__(self, times, total_time=200):
+        TimedPlayer.__init__(self, times, total_time=total_time)
+        self.stop_calls = 0
+
+    def stop(self):
+        self.stop_calls += 1
+
+
+def test_seeking_back_out_of_notification_window_closes_popup(monkeypatch):
+    properties = {'service.upnext.dialog': None}
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(playbackmanager, 'set_property',
+                        lambda key, value: properties.update({key: value}))
+    monkeypatch.setattr(playbackmanager, 'clear_property',
+                        lambda key: properties.update({key: None}))
+    monkeypatch.setattr(playbackmanager, 'sleep', lambda milliseconds: None)
+    manager = manager_with_recorders(notification_time=30)
+    # Popup shown 30s before the end, the user rewinds 50s after one second
+    manager.player = TimedPlayer([170, 171, 121, 121])
+    manager.state.played_in_a_row = 1
+    manager.state.pause = False
+    next_up_page = RecordingPage()
+    still_watching_page = RecordingPage()
+
+    result = manager.show_popup_and_wait(
+        {'runtime': 1200},
+        next_up_page,
+        still_watching_page,
+    )
+
+    assert result == (False, False, False, True)
+    assert next_up_page.shown is True
+    assert next_up_page.closed is True
+    assert next_up_page.remaining_updates == [29]
+    assert properties['service.upnext.dialog'] is None
+
+
+def test_small_position_jitter_keeps_popup_open(monkeypatch):
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(playbackmanager, 'set_property', lambda key, value: None)
+    monkeypatch.setattr(playbackmanager, 'sleep', lambda milliseconds: None)
+    manager = manager_with_recorders(notification_time=30)
+    # Popup shown slightly late, small backwards jumps stay within the grace
+    manager.player = TimedPlayer([171, 168, 166, 199.5])
+    manager.state.played_in_a_row = 1
+    manager.state.pause = False
+    next_up_page = RecordingPage()
+
+    result = manager.show_popup_and_wait({}, next_up_page, RecordingPage())
+
+    assert result == (True, False, False, False)
+    assert next_up_page.closed is False
+
+
+def test_seek_back_rearms_up_next_without_advancing(monkeypatch):
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 1)
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: False)
+    monkeypatch.setattr(playbackmanager, 'UpNext',
+                        lambda *args, **kwargs: RecordingPage())
+    monkeypatch.setattr(playbackmanager, 'StillWatching',
+                        lambda *args, **kwargs: RecordingPage())
+    events = []
+    monkeypatch.setattr(playbackmanager, 'event',
+                        lambda *args, **kwargs: events.append(kwargs))
+    manager = manager_with_recorders()
+    manager.player = SeekablePlayer([170])
+    manager.api.reset_addon_data = lambda: events.append('reset_addon_data')
+    manager.play_item = type('PI', (object,), {
+        'get_next': lambda self: ({'episodeid': 2, 'playcount': 0}, 'library'),
+    })()
+    manager.state.queued = False
+    manager.state.current_episode_id = 1
+    manager.state.track = True
+    manager.state.last_file = 'current.mkv'
+    manager.show_popup_and_wait = (
+        lambda episode, next_page, still_page: (False, False, False, True)
+    )
+    manager.extract_play_info = None  # Must not be called
+
+    assert manager.launch_up_next() is True
+    assert manager.rearm is True
+    # Queued next episode is removed again, it is queued when shown again
+    assert manager.api.queue_calls == 1
+    assert manager.api.dequeue_calls == 1
+    assert manager.state.queued is False
+    assert manager.state.last_file is None
+    assert manager.state.playing_next is False
+    assert manager.player.stop_calls == 0
+    # Add-on data is kept, nothing is played and no watched signal is sent
+    assert events == []
+
+
+def test_monitor_keeps_tracking_when_up_next_rearms(monkeypatch):
+    import monitor as monitor_module
+
+    monkeypatch.setattr(monitor_module, 'get_property', lambda key: '')
+    service = monitor_module.UpNextMonitor.__new__(monitor_module.UpNextMonitor)
+    calls = []
+    service.player = type('P', (object,), {
+        'is_tracking': lambda self: True,
+        'isExternalPlayer': lambda self: False,
+        'get_last_file': lambda self: None,
+        'set_last_file': lambda self, filename: calls.append(('last_file', filename)),
+        'getPlayingFile': lambda self: 'current.mkv',
+        'getTotalTime': lambda self: 200,
+        'getTime': lambda self: 175,
+        'disable_tracking': lambda self: calls.append('disable'),
+    })()
+    service.api = type('A', (object,), {
+        'notification_time': lambda self, total_time=None: 30,
+    })()
+    service.playback_manager = type('M', (object,), {
+        'launch_up_next': lambda self: calls.append('launch') or True,
+    })()
+
+    service._check_playback()
+
+    assert calls == [('last_file', 'current.mkv'), 'launch']
+
+
+def test_launch_up_next_reads_play_settings_fresh(monkeypatch):
+    settings = {'autoPlayMode': 1, 'includeWatched': True, 'enablePlaylist': False}
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: settings[setting])
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: settings[setting])
+    manager = manager_with_recorders()
+    manager.state.play_mode = 0
+    manager.state.include_watched = False
+    manager.play_item = type('PI', (object,), {
+        'get_next': lambda self: (None, None),
+    })()
+
+    assert manager.launch_up_next() is False
+    assert manager.state.play_mode == 1
+    assert manager.state.include_watched is True
+
+
+def test_launch_up_next_does_not_restore_a_cancelled_handoff(monkeypatch):
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: False)
+    manager = manager_with_recorders()
+    manager.api.reset_addon_data = lambda: None
+    manager.play_item = type('PI', (object,), {
+        'get_next': lambda self: ({'episodeid': 2}, 'library'),
+    })()
+
+    def stopped_during_handoff(episode, source):
+        # onPlayBackStopped reset the shared State while waiting for the handoff
+        manager.state.playing_next = False
+        manager.state.queued = False
+        return True, True
+
+    manager.launch_popup = stopped_during_handoff
+
+    assert manager.launch_up_next() is False
+    assert manager.state.playing_next is False
+
+
+def test_popup_is_closed_when_waiting_fails(monkeypatch):
+    properties = {}
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(playbackmanager, 'set_property',
+                        lambda key, value: properties.update({key: value}))
+    monkeypatch.setattr(playbackmanager, 'clear_property',
+                        lambda key: properties.update({key: None}))
+    monkeypatch.setattr(playbackmanager, 'sleep', lambda milliseconds: None)
+    manager = manager_with_recorders()
+    manager.player = TimedPlayer([170, 171])
+    manager.state.played_in_a_row = 1
+    manager.state.pause = False
+    next_up_page = RecordingPage()
+
+    def broken_update(remaining=None, runtime=None):
+        raise ValueError('skin error')
+
+    next_up_page.update_progress_control = broken_update
+
+    try:
+        manager.show_popup_and_wait({}, next_up_page, RecordingPage())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('ValueError was not raised')
+
+    assert next_up_page.closed is True
+    assert manager.open_pages == ()
+    assert properties['service.upnext.dialog'] is None
+
+    # Service error recovery closing the popup again is harmless
+    next_up_page.closed = False
+    manager.close_popup()
+    assert next_up_page.closed is False
+
+
+def test_service_error_recovery_closes_open_popup(monkeypatch):
+    properties = {}
+    monkeypatch.setattr(playbackmanager, 'clear_property',
+                        lambda key: properties.update({key: None}))
+    manager = manager_with_recorders()
+    page = RecordingPage()
+    manager.open_pages = (page,)
+
+    manager.close_popup()
+
+    assert page.closed is True
+    assert manager.open_pages == ()
+    assert properties['service.upnext.dialog'] is None
+
+
+def test_service_uses_a_single_player_instance(monkeypatch):
+    import monitor as monitor_module
+    import player as player_module
+
+    instances = []
+    player_init = player_module.UpNextPlayer.__init__
+
+    def counting_init(self):
+        instances.append(self)
+        player_init(self)
+
+    monkeypatch.setattr(player_module.UpNextPlayer, '__init__', counting_init)
+
+    service = monitor_module.UpNextMonitor()
+
+    assert len(instances) == 1
+    assert service.player is instances[0]
+    assert service.playback_manager.player is service.player
+    assert service.playback_manager.play_item.player is service.player
