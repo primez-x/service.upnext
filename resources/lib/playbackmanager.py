@@ -64,7 +64,18 @@ class PlaybackManager(object):
             self.log('Error: no episode could be found to play next...exiting', 1)
             return False
         self.log('episode details %s', 2, episode)
-        play_next, keep_playing = self.launch_popup(episode, source)
+        self.state.ended_during_popup = False
+        try:
+            play_next, keep_playing = self.launch_popup(episode, source)
+        finally:
+            self.state.popup_active = False
+        if Monitor().abortRequested():
+            # Service restart (add-on update) or Kodi exit: never start or
+            # leave queued the next episode on the way out
+            if self.state.queued:
+                self.state.queued = self.api.dequeue_next_item()
+            self.state.playing_next = False
+            return False
         # When playing next, launch_popup() set playing_next before starting
         # the next file. Don't set it again here: the handoff may already have
         # been consumed (next file started) or cancelled (playback stopped).
@@ -87,6 +98,9 @@ class PlaybackManager(object):
             self.player.stop()
 
         self.api.reset_addon_data()
+        if self.state.ended_during_popup and not play_next:
+            # onPlayBackEnded left the state to us: reset it as it would have
+            self.state.__init__()
         return False
 
     def launch_popup(self, episode, source=None):  # pylint: disable=too-many-locals
@@ -114,6 +128,7 @@ class PlaybackManager(object):
             next_up_page = UpNext('script-upnext-upnext.xml', addon_path(), 'default', '1080i')
             still_watching_page = StillWatching('script-upnext-stillwatching.xml', addon_path(), 'default', '1080i')
 
+        self.state.popup_active = True
         (showing_next_up_page,
          showing_still_watching_page,
          countdown_expired,
@@ -121,6 +136,10 @@ class PlaybackManager(object):
              episode,
              next_up_page,
              still_watching_page)
+        self.state.popup_active = False
+        if Monitor().abortRequested():
+            self.close_popup()
+            return False, True
         if seeked_back:
             # Don't play next file, keep playing current file and show Up Next again later
             self.rearm = True
@@ -309,7 +328,9 @@ class PlaybackManager(object):
         countdown_start_time = play_time
         countdown_expired = False
         seeked_back = False
+        monitor = Monitor()
         while (self.player.isPlaying() and (total_time - play_time > 1)
+               and not monitor.abortRequested()
                and not next_up_page.is_cancel() and not next_up_page.is_watch_now()
                and not still_watching_page.is_still_watching() and not still_watching_page.is_cancel()):
             try:

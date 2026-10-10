@@ -38,6 +38,7 @@ class UpNextMonitor(Monitor):
                 break
 
             try:
+                self.player.check_video_due()
                 self._check_playback()
             except Exception:  # pylint: disable=broad-except
                 # Never let an unexpected error kill the service: log it,

@@ -22,3 +22,7 @@ class State:
         self.pause = False
         self.queued = False
         self.playing_next = False
+        # Set while the Up Next / Still Watching popup is shown
+        self.popup_active = False
+        # The file reached its end while the popup was shown
+        self.ended_during_popup = False

@@ -26,6 +26,49 @@ def start_next_file(player):
     """Send the callback Kodi sends when the next file has started playing"""
     # Kodi v18+ uses onAVStarted, older versions (and the test stubs) onPlayBackStarted
     getattr(player, 'onAVStarted', player.onPlayBackStarted)()
+    # The service loop runs the episode check once it is due
+    player.check_video_due(now=float('inf'))
+
+
+def test_episode_check_runs_from_the_service_loop_not_the_callback():
+    player = player_without_waiting()
+    player.state = State()
+    player.state.track = False
+
+    getattr(player, 'onAVStarted', player.onPlayBackStarted)()
+    assert player.state.track is False  # callback returned at once
+    player.check_video_due(now=0)
+    assert player.state.track is False  # not due yet
+    player.check_video_due(now=float('inf'))
+    assert player.state.track is True
+    assert player.video_check_at is None
+
+
+def test_new_file_clears_a_stale_pause():
+    player = player_without_waiting()
+    player.state = State()
+    player.state.pause = True
+
+    start_next_file(player)
+
+    assert player.state.pause is False
+
+
+def test_end_of_file_during_popup_is_left_to_the_popup():
+    player = player_without_waiting()
+    api = Api()
+    player.state = State()
+    player.state.track = True
+    player.state.played_in_a_row = 2
+    player.state.popup_active = True
+    api.data = {'play_url': 'plugin://next'}
+
+    player.onPlayBackEnded()
+
+    assert player.state.ended_during_popup is True
+    assert player.state.track is True
+    assert player.state.played_in_a_row == 2
+    assert api.has_addon_data()
 
 
 def test_playing_next_is_cleared_when_next_file_starts():

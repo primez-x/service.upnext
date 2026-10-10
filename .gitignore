@@ -10,3 +10,6 @@ kodi-addon-checker.log
 
 # IDE Workspaces
 .idea/
+__pycache__/
+*.pyc
+.pytest_cache/

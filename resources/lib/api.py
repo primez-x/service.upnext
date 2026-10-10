@@ -2,7 +2,7 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-from xbmc import sleep, Monitor, PLAYLIST_VIDEO, PLAYLIST_MUSIC
+from xbmc import Monitor, PLAYLIST_VIDEO, PLAYLIST_MUSIC
 from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, log as ulog
 
 
@@ -266,7 +266,6 @@ class Api:  # pylint: disable=too-many-public-methods
             return None
 
         self.log('Got details of next up episode %s', 2, result)
-        sleep(100)
 
         # Find the next unwatched and the newest added episodes
         return self.find_next_episode(result, current_file, include_watched, current_episode_id)
@@ -284,7 +283,6 @@ class Api:  # pylint: disable=too-many-public-methods
             return None
 
         self.log('Find current episode called', 2)
-        sleep(100)
 
         # Find the next unwatched and the newest added episodes
         episodes = result.get('result', {}).get('episodes', [])
@@ -305,7 +303,7 @@ class Api:  # pylint: disable=too-many-public-methods
         for tvshow in result.get('result', {}).get('tvshows', []):
             if tvshow.get('label') == title:
                 return tvshow.get('tvshowid')
-        return '-1'
+        return -1
 
     @staticmethod
     def get_episode_id(showid, show_season, show_episode):

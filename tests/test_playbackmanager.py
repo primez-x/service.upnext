@@ -424,6 +424,7 @@ def test_monitor_survives_unexpected_launch_errors(monkeypatch):
     ticks = iter([False, False, True])
 
     service.player = type('P', (object,), {
+        'check_video_due': lambda self: None,
         'disable_tracking': lambda self: events.append('disable'),
         'reset_queue': lambda self: events.append('reset_queue'),
     })()
@@ -544,6 +545,69 @@ def test_seek_back_rearms_up_next_without_advancing(monkeypatch):
     assert manager.player.stop_calls == 0
     # Add-on data is kept, nothing is played and no watched signal is sent
     assert events == []
+
+
+def _manager_for_launch(monkeypatch, popup_result, on_popup=None):
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 1)
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: False)
+    monkeypatch.setattr(playbackmanager, 'UpNext', lambda *args, **kwargs: RecordingPage())
+    monkeypatch.setattr(playbackmanager, 'StillWatching', lambda *args, **kwargs: RecordingPage())
+    monkeypatch.setattr(playbackmanager, 'event', lambda *args, **kwargs: None)
+    monkeypatch.setattr(playbackmanager, 'set_property', lambda key, value: None)
+    monkeypatch.setattr(playbackmanager, 'clear_property', lambda key: None)
+
+    class ResettableState(object):
+        def __init__(self):
+            self.resets = getattr(self, 'resets', -1) + 1
+
+    manager = manager_with_recorders()
+    manager.player = SeekablePlayer([170])
+    manager.api.reset_addon_data = lambda: None
+    manager.play_item = type('PI', (object,), {
+        'get_next': lambda self: ({'episodeid': 2, 'playcount': 0}, 'library'),
+    })()
+    manager.state = ResettableState()
+    manager.state.queued = False
+    manager.state.playing_next = False
+    manager.state.current_episode_id = 1
+    manager.state.track = True
+    manager.state.pause = False
+    manager.state.played_in_a_row = 1
+
+    def show(episode, next_page, still_page):
+        assert manager.state.popup_active is True
+        if on_popup:
+            on_popup(manager)
+        return popup_result
+
+    manager.show_popup_and_wait = show
+    return manager
+
+
+def test_end_of_file_during_popup_resets_state_when_nothing_plays_next(monkeypatch):
+    def ended(manager):
+        manager.state.ended_during_popup = True
+
+    manager = _manager_for_launch(monkeypatch, (True, False, False, False), ended)
+
+    assert manager.launch_up_next() is False
+    assert manager.state.popup_active is False
+    assert manager.state.resets == 1
+
+
+def test_abort_during_popup_plays_nothing(monkeypatch):
+    class AbortingMonitor(object):
+        def abortRequested(self):
+            return True
+
+    monkeypatch.setattr(playbackmanager, 'Monitor', AbortingMonitor)
+    manager = _manager_for_launch(monkeypatch, (True, False, False, False))
+    manager.state.queued = True
+
+    assert manager.launch_up_next() is False
+    assert manager.state.playing_next is False
+    assert manager.api.dequeue_calls == 1
+    assert manager.player.stop_calls == 0
 
 
 def test_monitor_keeps_tracking_when_up_next_rearms(monkeypatch):
