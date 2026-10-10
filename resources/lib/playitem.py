@@ -84,18 +84,21 @@ class PlayItem:
 
         self.state.tv_show_id = item.get('tvshowid')
         if int(self.state.tv_show_id) == -1:
-            current_show_title = item.get('showtitle').encode('utf-8')
+            current_show_title = item.get('showtitle')
             self.state.tv_show_id = self.api.showtitle_to_id(title=current_show_title)
             self.log('Fetched missing tvshowid %s', 2, self.state.tv_show_id)
+            if int(self.state.tv_show_id) == -1:
+                return False
 
-        current_episode_number = item.get('episode')
-        current_season_id = item.get('season')
-        # Get current episodeid
-        current_episode_id = self.api.get_episode_id(
-            showid=str(self.state.tv_show_id),
-            show_episode=current_episode_number,
-            show_season=current_season_id,
-        )
+        # Player.GetItem names the library episode playing; only look it up by
+        # season and episode number when it does not
+        current_episode_id = item.get('id')
+        if not current_episode_id or int(current_episode_id) <= 0:
+            current_episode_id = self.api.get_episode_id(
+                showid=str(self.state.tv_show_id),
+                show_episode=item.get('episode'),
+                show_season=item.get('season'),
+            )
         self.state.current_episode_id = current_episode_id
         if self.state.current_tv_show_id != self.state.tv_show_id:
             self.log('Change in TV show ID: last: %s / current: %s', 2, self.state.current_tv_show_id, self.state.tv_show_id)
