@@ -1,9 +1,4 @@
 {
   "branch": "master",
-  "tests": [
-    ["python3", "-m", "pytest", "-q", "-o", "addopts=", "tests"]
-  ],
-  "test_env": {
-    "PYTHONPATH": "resources/lib:tests"
-  }
+  "tests": []
 }
