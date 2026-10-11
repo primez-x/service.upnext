@@ -777,3 +777,63 @@ def test_dequeue_removes_the_item_queued_after_a_longer_playlist(monkeypatch):
     # Nothing recorded: keep the historic [current, next] behaviour
     api.dequeue_next_item()
     assert calls[2] == ('Playlist.Remove', {'playlistid': 1, 'position': 1})
+
+
+def _repeat_conditions(mode):
+    """Kodi's playlist repeat conditions for repeat mode off, all or one"""
+    return {
+        'Playlist.IsRepeat': mode == 'all',
+        'Playlist.IsRepeatOne': mode == 'one',
+    }
+
+
+def _check_playback_with_repeat(monkeypatch, mode):
+    import monitor as monitor_module
+    import utils
+
+    conditions = _repeat_conditions(mode)
+    monkeypatch.setattr(utils, 'getCondVisibility', lambda condition: conditions.get(condition, False),
+                        raising=False)
+    monkeypatch.setattr(monitor_module, 'get_property', lambda key: '')
+    shown = []
+    manager = _manager_for_launch(monkeypatch, (True, False, False, False),
+                                  lambda manager: shown.append(True))
+    service = monitor_module.UpNextMonitor.__new__(monitor_module.UpNextMonitor)
+    calls = []
+    service.player = type('P', (object,), {
+        'is_tracking': lambda self: True,
+        'isExternalPlayer': lambda self: False,
+        'get_last_file': lambda self: None,
+        'set_last_file': lambda self, filename: calls.append(('last_file', filename)),
+        'getPlayingFile': lambda self: 'current.mkv',
+        'getTotalTime': lambda self: 200,
+        'getTime': lambda self: 175,
+        'disable_tracking': lambda self: calls.append('disable'),
+    })()
+    service.api = type('A', (object,), {
+        'notification_time': lambda self, total_time=None: 30,
+    })()
+    service.playback_manager = manager
+
+    service._check_playback()
+    return manager, shown, calls
+
+
+def test_repeat_one_shows_no_popup_and_queues_nothing(monkeypatch):
+    manager, shown, calls = _check_playback_with_repeat(monkeypatch, 'one')
+
+    assert shown == []
+    assert manager.api.queue_calls == 0
+    assert manager.state.queued is False
+    # Keep tracking without marking the file processed: turning repeat off
+    # before the end still shows Up Next
+    assert calls == []
+
+
+def test_repeat_off_and_all_show_the_popup(monkeypatch):
+    for mode in ('off', 'all'):
+        manager, shown, calls = _check_playback_with_repeat(monkeypatch, mode)
+
+        assert shown == [True], mode
+        assert manager.api.queue_calls == 1, mode
+        assert calls[0] == ('last_file', 'current.mkv'), mode

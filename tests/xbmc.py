@@ -243,7 +243,7 @@ def executeJSONRPC(jsonrpccommand):
 
 def getCondVisibility(string):
     ''' A reimplementation of the xbmc getCondVisibility() function '''
-    if string == 'system.platform.android':
+    if string in ('system.platform.android', 'Playlist.IsRepeatOne'):
         return False
     return True
 

@@ -8,7 +8,7 @@ from api import Api
 from playbackmanager import PlaybackManager
 from player import UpNextPlayer
 from statichelper import to_unicode
-from utils import clear_setting_cache, decode_json, get_property, get_setting_bool, kodi_version_major, log as ulog
+from utils import clear_setting_cache, decode_json, get_property, get_setting_bool, is_repeat_one, kodi_version_major, log as ulog
 
 
 class UpNextMonitor(Monitor):
@@ -130,6 +130,11 @@ class UpNextMonitor(Monitor):
         notification_time = self.api.notification_time(total_time=total_time)
         if total_time - play_time > notification_time:
             # Media hasn't reach notification time yet, waiting a bit longer...
+            return
+
+        if is_repeat_one():
+            # Kodi plays the current item again: no popup and nothing queued.
+            # Checked every tick, so turning repeat off later shows Up Next.
             return
 
         self.player.set_last_file(current_file)

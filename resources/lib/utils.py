@@ -7,7 +7,7 @@ import json
 from datetime import date
 from re import split as re_split
 from time import time as epoch_time
-from xbmc import executeJSONRPC, getInfoLabel, getRegion, log as xlog, LOGDEBUG, LOGINFO
+from xbmc import executeJSONRPC, getCondVisibility, getInfoLabel, getRegion, log as xlog, LOGDEBUG, LOGINFO
 from xbmcaddon import Addon
 from xbmcgui import Window
 from statichelper import from_unicode, to_unicode
@@ -41,6 +41,11 @@ def get_kodi_version():
     """Return Kodi version number as float"""
     build = getInfoLabel("System.BuildVersion")
     return float(build[:4])
+
+
+def is_repeat_one():
+    """Return True when the playing playlist repeats the current item, Kodi then plays it again"""
+    return bool(getCondVisibility('Playlist.IsRepeatOne'))
 
 
 def get_property(key, window_id=10000):
