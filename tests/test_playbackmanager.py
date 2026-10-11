@@ -745,3 +745,35 @@ def test_service_uses_a_single_player_instance(monkeypatch):
     assert service.player is instances[0]
     assert service.playback_manager.player is service.player
     assert service.playback_manager.play_item.player is service.player
+
+
+def test_dequeue_removes_the_item_queued_after_a_longer_playlist(monkeypatch):
+    """Close on the last item of a season playlist must not leave the next episode queued"""
+    import api as api_module
+
+    calls = []
+
+    class SeasonPlayList:
+        def __init__(self, playlistid):
+            self.playlistid = playlistid
+
+        def size(self):
+            return 3  # E1, E2, E3 (playing)
+
+    def record(**kwargs):
+        calls.append((kwargs.get('method'), kwargs.get('params')))
+        return {}
+
+    monkeypatch.setattr(api_module, 'PlayList', SeasonPlayList)
+    monkeypatch.setattr(api_module, 'jsonrpc', record)
+    monkeypatch.setattr(api_module.Api, 'get_playlistid', staticmethod(lambda: 1))
+    api = api_module.Api()
+
+    assert api.queue_next_item({'episodeid': 42}) is True
+    assert api.dequeue_next_item() is False
+
+    assert calls[0] == ('Playlist.Add', {'playlistid': 1, 'item': {'episodeid': 42}})
+    assert calls[1] == ('Playlist.Remove', {'playlistid': 1, 'position': 3})
+    # Nothing recorded: keep the historic [current, next] behaviour
+    api.dequeue_next_item()
+    assert calls[2] == ('Playlist.Remove', {'playlistid': 1, 'position': 1})

@@ -2,13 +2,15 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-from xbmc import Monitor, PLAYLIST_VIDEO, PLAYLIST_MUSIC
+from xbmc import Monitor, PlayList, PLAYLIST_VIDEO, PLAYLIST_MUSIC
 from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, log as ulog
 
 
 class Api:  # pylint: disable=too-many-public-methods
     """Main API class"""
     _shared_state = {}
+    # Playlist position of the item added by queue_next_item()
+    queued_position = None
 
     PLAYER_PLAYLIST = {
         'video': PLAYLIST_VIDEO,  # 1
@@ -93,26 +95,30 @@ class Api:  # pylint: disable=too-many-public-methods
             next_item.update(file=self.data.get('play_url'))
 
         if next_item:
+            playlistid = Api.get_playlistid()
+            # Playlist.Add appends: remember where, the current item is not
+            # always at position 0 (e.g. the last item of a season playlist)
+            self.queued_position = PlayList(playlistid).size()
             jsonrpc(
                 method='Playlist.Add',
                 id=0,
                 params={
-                    'playlistid': Api.get_playlistid(),
+                    'playlistid': playlistid,
                     'item': next_item
                 }
             )
 
         return bool(next_item)
 
-    @staticmethod
-    def dequeue_next_item():
+    def dequeue_next_item(self):
         """Remove unplayed next item from video playlist"""
+        position, self.queued_position = self.queued_position, None
         jsonrpc(
             method='Playlist.Remove',
             id=0,
             params={
                 'playlistid': Api.get_playlistid(),
-                'position': 1
+                'position': 1 if position is None else position
             }
         )
         return False
