@@ -1,136 +1,59 @@
-[![GitHub release](https://img.shields.io/github/release/im85288/service.upnext.svg)](https://github.com/im85288/service.upnext/releases)
-[![CI](https://github.com/im85288/service.upnext/workflows/CI/badge.svg)](https://github.com/im85288/service.upnext/actions?query=workflow:CI)
-[![Codecov status](https://img.shields.io/codecov/c/github/im85288/service.upnext/master)](https://codecov.io/gh/im85288/service.upnext/branch/master)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv2-yellow.svg)](https://opensource.org/licenses/GPL-2.0)
-[![Contributors](https://img.shields.io/github/contributors/im85288/service.upnext.svg)](https://github.com/im85288/service.upnext/graphs/contributors)
+# Up Next
 
-# Up Next - Proposes to play the next episode automatically
+Up Next shows an episode countdown near the end of Kodi video playback. The prompt can start the next episode, stop playback, or ask whether you are still watching after several automatic plays.
 
-This Kodi add-on shows a Netflix-style notification for watching the next episode. After a few automatic iterations it asks the user if he is still there watching.
+The add-on manifest imports Kodi's `xbmc.python` API at version `3.0.0`.
 
-A lot of existing add-ons already integrate with this service out-of-the-box.
+## Install
+
+1. Install the [Primez repository ZIP](https://primez-x.github.io/kodi.addons/repository.primez.addons/repository.primez.addons-1.0.0.zip) in Kodi.
+2. Open **Add-ons → Install from repository → Primez Kodi Add-ons → Services**.
+3. Install **Up Next** and open the add-on settings from Kodi's Services list.
+
+See the [Primez repository site](https://primez-x.github.io/kodi.addons/) and the [central repository guide](https://github.com/primez-x/kodi.addons/blob/main/README.md) for repository setup.
+
+## Playback and provider support
+
+The service watches Kodi's video player for episodes. Kodi's video library can supply the next episode. The **Enable on playlists** setting also permits prompts for existing Kodi video playlist items; the default is off.
+
+Third-party providers must send Kodi's `Other.upnext_data` notification with next-episode data to use the provider path. The service reads `current_episode`, `next_episode`, and optional `notification_time`, `notification_offset`, `play_url`, or `play_info` fields. Provider support depends on each add-on's implementation.
+
+For an existing playlist item, Kodi keeps control of the queue and advances normally. Outside a playlist, Up Next queues a Kodi library episode ID or provider `play_url` when available. If a provider supplies only `play_info`, Up Next sends the play action to that provider. The service records the queued position and removes only that item when playback does not advance.
+
+Up Next stops tracking external players and optical-disc sources. The service does not provide provider playback or guarantee support from every provider add-on.
 
 ## Settings
-The add-on has various settings to fine-tune the experience, however the default settings should be fine for most.
 
-  * Simple or fancy mode (defaults to fancy mode, but a more simple interface is possible)
-  * The notification time can be adjusted (defaults to 30 seconds before the end)
-  * The default action can be configured, i.e. should it advance to the next episode (default) when the user does not respond, or stop
-  * The number of episodes to play automatically before asking the user if he is still there (defaults to 3 episodes)
+- **Display mode:** Fancy by default; Simple is also available.
+- **Close action:** Show **Close** by default, or show **Stop** instead.
+- **Default action:** Play the next episode when the countdown ends, or stop playing.
+- **Enable on playlists:** Off by default.
+- **Include already watched episodes:** Off by default.
+- **Still there? prompt:** Ask after 3 automatic episodes by default. Set the count from 0 to 15.
+- **Autoplay duration:** Customize by episode length by default. The defaults range from 15 seconds for episodes up to 10 minutes to 60 seconds for episodes over an hour. Turn customization off to use 30 seconds for every episode.
+- **Expert:** Disable Up Next or change the log level.
+- **Developer:** Enable demo mode and preview the four popup layouts.
 
-> NOTE: The add-on settings are found in the Kodi add-ons section, in the *Services* category.
+## Source layout
 
-For [Addon Integration](https://github.com/im85288/service.upnext/wiki/Integration) and [Skinners](https://github.com/im85288/service.upnext/wiki/Skinners) see the [wiki](https://github.com/im85288/service.upnext/wiki)
+- `resources/lib/service_entry.py` starts the background service.
+- `resources/lib/monitor.py`, `playbackmanager.py`, and `api.py` track playback, show prompts, and handle provider or Kodi data.
+- `resources/settings.xml` defines settings.
+- `resources/skins/default/1080i/` contains popup layouts.
+- `tests/` contains Python tests with Kodi stubs.
 
-## Running the tests
-The tests run outside Kodi against the stubs in `tests/` (including a minimal `AddonSignals` stub), they only need `pytest` and `polib`:
+## Tests and maintenance
 
-```shell
-pip install pytest polib
-PYTHONPATH=resources/lib:tests python -m pytest -o addopts="" tests
+The configured publish test is:
+
+```sh
+PYTHONPATH=resources/lib:tests python3 -m pytest -q -o addopts= tests
 ```
 
-`make test` additionally runs the tox/flake8, pylint and translation checks and needs the packages from `requirements.txt`.
+The tracked branch is `master`. A configured source webhook forwards tracked-branch pushes to the central publish workflow. If the webhook is absent or rejected, use the manual workflow described in the central guide. Enable local publish checks with `git config core.hooksPath .githooks`.
 
-## Releases
+README-only edits do not need an add-on version bump. Changes to shipped behavior need a new `addon.xml` version and a matching first line in `<news>`. Follow the central [versioning rules](https://github.com/primez-x/kodi.addons/blob/main/VERSIONING.md).
 
-### v1.1.9 (2023-05-10)
-- Fix handling of non-ASCII filenames for Kodi18 (@MoojMidge)
-- Fix failing ci workflow (@MoojMidge)
-- Update Swedish translation (@Sopor)
-- Explicitly set sonarcloud coverage path (@MoojMidge)
-- Fix error when kodi is not playing video any longer (@AnonTester)
+Up Next began in [im85288's upstream repository](https://github.com/im85288/service.upnext). The Primez fork is maintained in [primez-x/service.upnext](https://github.com/primez-x/service.upnext) and uses [GPL-2.0-only](LICENSE).
 
-### v1.1.8 (2022-09-13)
-- Never ask if Still Watching? if playedInARow is 0 (@MoojMidge)
-- Still Watching? checks number of plays not number+1 (@MoojMidge)
-
-### v1.1.7 (2022-09-03)
-- Update check for filename of multi-part episodes (@MoojMidge)
-- Check for physical disc or disc image being played (@MoojMidge)
-- Translation update to Russian (@ArtyIF)
-- Fix CI workflow (@MoojMidge)
-
-### v1.1.6 (2022-03-07)
-- Fix for missing mediatype video info with addon video content (@MoojMidge)
-- Translation updates to Croatian, Japanese, Korean, Swedish and Finnish (@dsardelic, @Thunderbird2086, @Sopor, @Dis90)
-- New translation for Taiwanese Mandarin (@JuenTingShie)
-- Use onAVStarted instead of onPlayBackStarted (@MoojMidge)
-- Fix for Kodi not using the video player/playlist to play videos (@MoojMidge)
-- Fixes misalignment of system.time and endtime (@jojobrogess)
-
-### v1.1.5 (2021-02-21)
-- Fix playlists to work with non-library content (@MoojMidge)
-- Fix to prevent unwanted playback when using playlist queueing method (@MoojMidge)
-- New translation for Finnish (@Dis90)
-
-### v1.1.4 (2020-12-03)
-- Fix problem causing pop-up to not appear (@MoojMidge)
-- Translation updates to Romanian, Russian and Spanish (@tmihai20, @vlmaksime, @roliverosc)
-
-### v1.1.3 (2020-10-14)
-- Enable customPlayTime by default (@dagwieers)
-- Do not seek to the end before playing next episode (@dagwieers)
-- Add Kodi v17 compatibility (@dagwieers)
-- Fix logging on Kodi v19 (Matrix) after recent breakage (@MoojMidge)
-- Enqueue the next episode in the playlist (@MoojMidge)
-- Translation updates to German (@tweimer)
-
-### v1.1.2 (2020-06-22)
-- Small bugfix release (@im85288)
-- Translation updates to Japanese and Korean (@Thunderbird2086)
-
-### v1.1.1 (2020-06-21)
-- Avoid conflict with external players (@BrutuZ)
-- Restore "Ignore Playlist" option (@BrutuZ)
-- Fix a known Kodi bug related to displaying hours (@Maven85)
-- Improvements to endtime visualization (@dagwieers)
-- New translations for Hindi and Romanian (@tahirdon, @tmihai20)
-- Translation updates to Hungarian and Spanish (@frodo19, @roliverosc)
-
-### v1.1.0 (2020-01-17)
-- Add notification_offset for Netflix add-on (@CastagnaIT)
-- Fix various runtime exceptions (@thebertster)
-- Implement new settings (@dagwieers)
-- Implement new developer mode (@dagwieers)
-- Show current time and next endtime in notification (@dagwieers)
-- New translations for Brazilian, Czech, Greek, Japanese, Korean (@mediabrasiltv, @svetlemodry, @Twilight0, @Thunderbird2086)
-- New translations for Russian, Slovak, Spanish, Swedish (@vlmaksime, @matejmosko, @sagatxxx, @Sopor)
-- Translation updates to Croatian, French, German, Hungarian, Italian, Polish (@arvvoid, @zecakeh, @tweimer, @frodo19, @EffeF, @notoco)
-
-### v1.0.7 (2019-12-03)
-- Add Up Next in the program add-on section (@dagwieers)
-- Update add-on icon to use black background (@dagwieers)
-- Fix 24-hour format based on Kodi setting (@dagwieers)
-- New translations for Croatian (@arvvoid)
-- Translation updates to French, Hungarian, Italian and Polish (@mediaminister, @frodo19, @EffeF, @notoco)
-
-### v1.0.6 (2019-11-26)
-- Implement base64 encoding to support newer AddonSignals (@dagwieers)
-- Fixes to Python 3.5 support (@anxdpanic)
-- Add SPDX identifier for license (@dagwieers)
-- Translation updates to German (@tweimer)
-
-### v1.0.5 (2019-11-19)
-- Translation fixes (@dagwieers)
-
-### v1.0.4 (2019-11-19)
-- Automatic stop playing as option (@notoco)
-- Fix exception when add-on is exited (@dagwieers)
-- Fix playlist logic (@mediaminister)
-- Add support for Python 3 and Kodi v19 (@mediaminister)
-- Introduce "Close" button when configured in settings (@dagwieers)
-- Add support for a Back-button action to dismiss Up Next pop-up (@dagwieers)
-- Always reset state when playback finishes (@mediaminister)
-- Various code improvements and fixes (@dagwieers, @mediaminister)
-- New translations for Dutch (@dagwieers)
-- Translation updates to German (@semool, @beatmasterRS)
-
-### v1.0.3 (2019-07-30)
-- Disable tracking for non episode (@angelblue05)
-
-### v1.0.2 (2019-07-24)
-- Add JSONRPC method (@angelblue05)
-- Add priority to existing playlist (@angelblue05)
-- Add endtime prop (@angelblue05)
-- Remove enablePlaylist setting (@angelblue05)
+The shared `utils.py` and `statichelper.py` modules are maintained in [`kodi.addons/tools/service_common/`](https://github.com/primez-x/kodi.addons/tree/main/tools/service_common/). From the central repository root, run `python3 tools/sync_service_common.py --check` to compare the copies. Run `python3 tools/sync_service_common.py` to copy changed masters to both source trees.
