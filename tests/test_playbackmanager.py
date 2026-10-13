@@ -774,9 +774,9 @@ def test_dequeue_removes_the_item_queued_after_a_longer_playlist(monkeypatch):
 
     assert calls[0] == ('Playlist.Add', {'playlistid': 1, 'item': {'episodeid': 42}})
     assert calls[1] == ('Playlist.Remove', {'playlistid': 1, 'position': 3})
-    # Nothing recorded: keep the historic [current, next] behaviour
+    # No position is owned, so leave other playlist entries alone.
     api.dequeue_next_item()
-    assert calls[2] == ('Playlist.Remove', {'playlistid': 1, 'position': 1})
+    assert len(calls) == 2
 
 
 def _repeat_conditions(mode):

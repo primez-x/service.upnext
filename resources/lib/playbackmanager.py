@@ -324,7 +324,9 @@ class PlaybackManager(object):
             if notification_duration is not None
             else total_time - play_time
         )
-        progress_step_size = calculate_progress_steps(progress_period)
+        progress_step_size = calculate_progress_steps(
+            progress_period, update_interval_sec=0.1
+        )
         next_up_page.set_progress_step_size(progress_step_size)
         still_watching_page.set_progress_step_size(progress_step_size)
         countdown_start_time = play_time

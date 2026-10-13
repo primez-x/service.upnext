@@ -64,3 +64,9 @@ def test_cached_settings_are_read_once_per_playback(monkeypatch):
     utils.get_setting_int('autoPlaySeasonTime', cache=True)
     assert reads == ['autoPlaySeasonTime'] * 3
     utils.clear_setting_cache()
+
+
+def test_progress_steps_use_the_tick_interval():
+    assert utils.calculate_progress_steps(10) == 1.0
+    assert utils.calculate_progress_steps(10, update_interval_sec=2) == 20.0
+    assert utils.calculate_progress_steps(0, update_interval_sec=2) == 10.0

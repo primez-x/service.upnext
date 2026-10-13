@@ -101,7 +101,11 @@ class Api:  # pylint: disable=too-many-public-methods
     def queue_next_item(self, episode):
         next_item = {}
         if not self.data:
-            next_item.update(episodeid=episode.get('episodeid'))
+            episodeid = episode.get('episodeid')
+            if episodeid in (None, -1):
+                self.log('Not queueing next episode without a valid episodeid: %s', 1, episode)
+                return False
+            next_item.update(episodeid=episodeid)
         elif self.data.get('play_url'):
             next_item.update(file=self.data.get('play_url'))
 
@@ -109,8 +113,8 @@ class Api:  # pylint: disable=too-many-public-methods
             playlistid = Api.get_playlistid()
             # Playlist.Add appends: remember where, the current item is not
             # always at position 0 (e.g. the last item of a season playlist)
-            self.queued_position = PlayList(playlistid).size()
-            jsonrpc(
+            position = PlayList(playlistid).size()
+            result = jsonrpc(
                 method='Playlist.Add',
                 id=0,
                 params={
@@ -118,18 +122,23 @@ class Api:  # pylint: disable=too-many-public-methods
                     'item': next_item
                 }
             )
+            if result.get('error'):
+                return False
+            self.queued_position = position
 
         return bool(next_item)
 
     def dequeue_next_item(self):
         """Remove unplayed next item from video playlist"""
         position, self.queued_position = self.queued_position, None
+        if position is None:
+            return False
         jsonrpc(
             method='Playlist.Remove',
             id=0,
             params={
                 'playlistid': Api.get_playlistid(),
-                'position': 1 if position is None else position
+                'position': position
             }
         )
         return False

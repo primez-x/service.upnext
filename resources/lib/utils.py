@@ -13,6 +13,7 @@ from xbmcgui import Window
 from statichelper import from_unicode, to_unicode
 
 ADDON = Addon()
+HOME_WINDOW = Window(10000)
 
 # Settings that are read every service tick are cached per playback, see clear_setting_cache()
 _SETTINGS_CACHE = {}
@@ -50,16 +51,22 @@ def is_repeat_one():
 
 def get_property(key, window_id=10000):
     """Get a Window property"""
+    if window_id == 10000:
+        return to_unicode(HOME_WINDOW.getProperty(key))
     return to_unicode(Window(window_id).getProperty(key))
 
 
 def set_property(key, value, window_id=10000):
     """Set a Window property"""
+    if window_id == 10000:
+        return HOME_WINDOW.setProperty(key, from_unicode(str(value)))
     return Window(window_id).setProperty(key, from_unicode(str(value)))
 
 
 def clear_property(key, window_id=10000):
     """Clear a Window property"""
+    if window_id == 10000:
+        return HOME_WINDOW.clearProperty(key)
     return Window(window_id).clearProperty(key)
 
 
@@ -232,11 +239,12 @@ def log(msg, *args, **kwargs):
     xlog('[%s] %s -> %s' % (addon_id(), kwargs.get('name'), from_unicode(msg)), level=level)
 
 
-def calculate_progress_steps(period):
-    """Calculate a progress step"""
-    if int(period) == 0:  # Avoid division by zero
+def calculate_progress_steps(period, update_interval_sec=0.1):
+    """Calculate the progress percentage to subtract for each tick."""
+    period = int(period)
+    if period == 0:  # Avoid division by zero
         return 10.0
-    return (100.0 / int(period)) / 10
+    return (100.0 * update_interval_sec) / period
 
 
 def jsonrpc(**kwargs):
