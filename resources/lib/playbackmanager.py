@@ -14,6 +14,8 @@ from utils import addon_path, calculate_progress_steps, clear_property, event, g
 
 # Close the popup when playback moved back this many seconds before the notification time
 SEEK_BACK_GRACE = 5
+# Poll interval of the popup loop while playback is paused
+PAUSED_INTERVAL_S = 0.5
 
 
 class PlaybackManager(object):
@@ -367,7 +369,10 @@ class PlaybackManager(object):
                     next_up_page.update_progress_control(remaining=remaining, runtime=runtime)
                 elif showing_still_watching_page:
                     still_watching_page.update_progress_control(remaining=remaining, runtime=runtime)
-            sleep(100)
+                sleep(100)
+            else:
+                # Nothing moves while paused: check twice a second only.
+                monitor.waitForAbort(PAUSED_INTERVAL_S)
         return (showing_next_up_page,
                 showing_still_watching_page,
                 countdown_expired,

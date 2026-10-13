@@ -837,3 +837,77 @@ def test_repeat_off_and_all_show_the_popup(monkeypatch):
         assert shown == [True], mode
         assert manager.api.queue_calls == 1, mode
         assert calls[0] == ('last_file', 'current.mkv'), mode
+
+
+class PausedPopupMonitor(object):
+    def __init__(self, abort_after=None):
+        self.abort_after = abort_after
+        self.timeouts = []
+
+    def abortRequested(self):
+        return (self.abort_after is not None
+                and len(self.timeouts) >= self.abort_after)
+
+    def waitForAbort(self, timeout=None):
+        self.timeouts.append(timeout)
+        return self.abortRequested()
+
+
+class CancellingPage(RecordingPage):
+    def __init__(self, cancel_after):
+        RecordingPage.__init__(self)
+        self.cancel_after = cancel_after
+        self.checks = 0
+
+    def is_cancel(self):
+        self.checks += 1
+        return self.checks > self.cancel_after
+
+
+def _paused_popup_manager(monkeypatch, monitor):
+    sleeps = []
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(playbackmanager, 'set_property', lambda key, value: None)
+    monkeypatch.setattr(playbackmanager, 'sleep', sleeps.append)
+    monkeypatch.setattr(playbackmanager, 'Monitor', lambda: monitor)
+    manager = manager_with_recorders(notification_time=30)
+    manager.player = TimedPlayer([171])
+    manager.state.played_in_a_row = 1
+    manager.state.pause = True
+    return manager, sleeps
+
+
+def test_paused_popup_polls_slowly_and_exits_when_closed(monkeypatch):
+    monitor = PausedPopupMonitor()
+    manager, sleeps = _paused_popup_manager(monkeypatch, monitor)
+    next_up_page = CancellingPage(cancel_after=3)
+
+    result = manager.show_popup_and_wait({}, next_up_page, RecordingPage())
+
+    assert result == (True, False, False, False)
+    assert monitor.timeouts == [0.5, 0.5, 0.5]
+    assert sleeps == []
+    assert next_up_page.remaining_updates == []
+
+
+def test_paused_popup_exits_on_abort(monkeypatch):
+    monitor = PausedPopupMonitor(abort_after=2)
+    manager, sleeps = _paused_popup_manager(monkeypatch, monitor)
+
+    result = manager.show_popup_and_wait({}, RecordingPage(), RecordingPage())
+
+    assert result == (True, False, False, False)
+    assert monitor.timeouts == [0.5, 0.5]
+    assert sleeps == []
+
+
+def test_playing_popup_keeps_fast_polling(monkeypatch):
+    monitor = PausedPopupMonitor()
+    manager, sleeps = _paused_popup_manager(monkeypatch, monitor)
+    manager.state.pause = False
+    manager.player = TimedPlayer([171, 172, 199.5])
+
+    manager.show_popup_and_wait({}, RecordingPage(), RecordingPage())
+
+    assert sleeps == [100, 100]
+    assert monitor.timeouts == []
