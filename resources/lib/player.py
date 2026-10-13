@@ -42,6 +42,7 @@ class UpNextPlayer(Player):
         self.state.track = True
 
     def reset_queue(self):
+        Api.clear_caches()
         if self.state.queued:
             self.api.reset_queue()
             self.state.queued = False

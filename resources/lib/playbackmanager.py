@@ -366,9 +366,9 @@ class PlaybackManager(object):
             runtime = episode.get('runtime')
             if not self.state.pause:
                 if showing_next_up_page:
-                    next_up_page.update_progress_control(remaining=remaining, runtime=runtime)
+                    next_up_page.update_progress_control(remaining=remaining, runtime=runtime, period=progress_period)
                 elif showing_still_watching_page:
-                    still_watching_page.update_progress_control(remaining=remaining, runtime=runtime)
+                    still_watching_page.update_progress_control(remaining=remaining, runtime=runtime, period=progress_period)
                 sleep(100)
             else:
                 # Nothing moves while paused: check twice a second only.

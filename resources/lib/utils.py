@@ -160,7 +160,7 @@ def decode_data(encoded):
         json_data = unhexlify(encoded)
     except (TypeError, Error):
         from base64 import b64decode
-        json_data = b64decode(encoded)
+        json_data = b64decode(encoded, validate=False)
     else:
         encoding = 'hex'
     # NOTE: With Python 3.5 and older json.loads() does not support bytes or bytearray, so we convert to unicode
@@ -168,10 +168,15 @@ def decode_data(encoded):
 
 
 def decode_json(data):
-    encoded = json.loads(data)
-    if not encoded:
+    # Provider payloads are untrusted input: malformed data must read as
+    # "not JSON" (the monitors' None branch), never raise in onNotification
+    try:
+        encoded = json.loads(data)
+        if not encoded:
+            return None, None
+        return decode_data(encoded[0])
+    except Exception:  # pylint: disable=broad-except
         return None, None
-    return decode_data(encoded[0])
 
 
 def event(message, data=None, sender=None, encoding='base64'):
@@ -193,8 +198,6 @@ def event(message, data=None, sender=None, encoding='base64'):
 def refresh_log_settings():
     """Read the log settings, they are cached for LOG_SETTINGS_TTL seconds"""
     log_level = get_setting_int('logLevel')
-    if log_level is not None:
-        set_property('logLevel', log_level)
     _LOG_SETTINGS.update(
         log_level=log_level,
         debug_logging=bool(get_global_setting('debug.showloginfo')),

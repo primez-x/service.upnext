@@ -9,6 +9,8 @@ from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, lo
 class Api:  # pylint: disable=too-many-public-methods
     """Main API class"""
     _shared_state = {}
+    _playerid_cache = None
+    _playlistid_cache = None
     # Playlist position of the item added by queue_next_item()
     queued_position = None
 
@@ -43,12 +45,18 @@ class Api:  # pylint: disable=too-many-public-methods
         jsonrpc(method='Player.Open', id=0, params={'item': {'episodeid': episode.get('episodeid')}})
 
     @staticmethod
-    def _get_playerid(playerid_cache=[None]):  # pylint: disable=dangerous-default-value
+    def clear_caches():
+        """Invalidate player/playlist ID caches (call when playback stops/ends/errors)."""
+        Api._playerid_cache = None
+        Api._playlistid_cache = None
+
+    @staticmethod
+    def _get_playerid():
         """Function to get active player playerid"""
 
         # We don't need to actually get playerid everytime, cache and reuse instead
-        if playerid_cache[0] is not None:
-            return playerid_cache[0]
+        if Api._playerid_cache is not None:
+            return Api._playerid_cache
 
         # Sometimes Kodi gets confused and uses a music playlist for video content,
         # so get the first active player instead, default to video player.
@@ -63,29 +71,32 @@ class Api:  # pylint: disable=too-many-public-methods
         if playerid == -1:
             return None
 
-        playerid_cache[0] = playerid
+        Api._playerid_cache = playerid
         return playerid
 
     @staticmethod
-    def get_playlistid(playlistid_cache=[None]):  # pylint: disable=dangerous-default-value
+    def get_playlistid():
         """Function to get playlistid of active player"""
 
-        # We don't need to actually get playlistid everytime, cache and reuse instead
-        if playlistid_cache[0] is not None:
-            return playlistid_cache[0]
+        if Api._playlistid_cache is not None:
+            return Api._playlistid_cache
+
+        playerid = Api._get_playerid()
+        if playerid is None:
+            return Api.PLAYER_PLAYLIST['video']
 
         result = jsonrpc(
             method='Player.GetProperties',
             params={
-                'playerid': Api._get_playerid(playerid_cache=[None]),
+                'playerid': playerid,
                 'properties': ['playlistid'],
             }
         )
-        result = get_int(
+        Api._playlistid_cache = get_int(
             result.get('result', {}), 'playlistid', Api.PLAYER_PLAYLIST['video']
         )
 
-        return result
+        return Api._playlistid_cache
 
     def queue_next_item(self, episode):
         next_item = {}
@@ -189,14 +200,26 @@ class Api:  # pylint: disable=too-many-public-methods
         self.log('handle_addon_lookup_of_current episode returning data %(current_episode)s', 2, self.data)
         return self.data.get('current_episode')
 
+    def _provider_int(self, key):
+        value = self.data.get(key)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            self.log('Ignoring invalid %s from provider: %s', 1, key, value)
+            return None
+
     def notification_time(self, total_time=None):
         # Alway use metadata, when available
-        if self.data.get('notification_time'):
-            return int(self.data.get('notification_time'))
+        notification_time = self._provider_int('notification_time')
+        if notification_time is not None:
+            return max(0, notification_time)
 
         # Some consumers send the offset when the credits start (e.g. Netflix)
-        if total_time and self.data.get('notification_offset'):
-            return total_time - int(self.data.get('notification_offset'))
+        notification_offset = self._provider_int('notification_offset')
+        if total_time and notification_offset is not None:
+            return total_time - notification_offset
 
         # Use a customized notification time, when configured
         # This is called every service tick, so the settings are cached per playback
@@ -275,32 +298,6 @@ class Api:  # pylint: disable=too-many-public-methods
 
         # Find the next unwatched and the newest added episodes
         return self.find_next_episode(result, current_file, include_watched, current_episode_id)
-
-    def handle_kodi_lookup_of_current_episode(self, tvshowid, current_episode_id):
-        result = jsonrpc(method='VideoLibrary.GetEpisodes', params={
-            'tvshowid': tvshowid,
-            'properties': ['art', 'dateadded', 'episode', 'file', 'firstaired', 'lastplayed',
-                           'playcount', 'plot', 'rating', 'resume', 'runtime', 'season',
-                           'showtitle', 'streamdetails', 'title', 'tvshowid', 'writer'],
-            'sort': {'method': 'episode'},
-        })
-
-        if not result.get('result'):
-            return None
-
-        self.log('Find current episode called', 2)
-
-        # Find the next unwatched and the newest added episodes
-        episodes = result.get('result', {}).get('episodes', [])
-        for idx, episode in enumerate(episodes):
-            # Find position of current episode
-            if current_episode_id == episode.get('episodeid'):
-                self.log('Find current episode found episode in position: %d', 2, idx)
-                return episode
-
-        # No next episode found
-        self.log('No next episode found', 1)
-        return None
 
     @staticmethod
     def showtitle_to_id(title):

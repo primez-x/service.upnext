@@ -25,7 +25,7 @@ class PlayItem:
     def get_playlist_position(self):
         """Function to get current playlist playback position"""
 
-        playlist = PlayList(self.api.get_playlistid(playlistid_cache=[None]))
+        playlist = PlayList(self.api.get_playlistid())
         position = playlist.getposition()
         # A playlist with only one element has no next item and PlayList().getposition() starts counting from zero
         if playlist.size() > 1 and position < (playlist.size() - 1):

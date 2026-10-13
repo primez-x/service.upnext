@@ -258,7 +258,7 @@ class RecordingPage:
     def is_still_watching(self):
         return False
 
-    def update_progress_control(self, remaining=None, runtime=None):
+    def update_progress_control(self, remaining=None, runtime=None, period=None):
         self.remaining_updates.append(remaining)
 
 
@@ -689,7 +689,7 @@ def test_popup_is_closed_when_waiting_fails(monkeypatch):
     manager.state.pause = False
     next_up_page = RecordingPage()
 
-    def broken_update(remaining=None, runtime=None):
+    def broken_update(remaining=None, runtime=None, period=None):
         raise ValueError('skin error')
 
     next_up_page.update_progress_control = broken_update

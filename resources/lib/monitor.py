@@ -27,15 +27,20 @@ class UpNextMonitor(Monitor):
         """Log wrapper"""
         ulog(msg, *args, name=self.__class__.__name__, level=level)
 
+    _poll_delay = 1
+
     def run(self):
         """Main service loop"""
         self.log('Service started', 0)
 
         while not self.abortRequested():
-            # check every 1 sec
-            if self.waitForAbort(1):
+            # Check every second while idle or inside the notification
+            # window; _check_playback stretches this (up to 10s) while an
+            # episode is far from its notification time
+            if self.waitForAbort(self._poll_delay):
                 # Abort was requested while waiting. We should exit
                 break
+            self._poll_delay = 1
 
             try:
                 self.player.check_video_due()
@@ -129,7 +134,11 @@ class UpNextMonitor(Monitor):
 
         notification_time = self.api.notification_time(total_time=total_time)
         if total_time - play_time > notification_time:
-            # Media hasn't reach notification time yet, waiting a bit longer...
+            # Media hasn't reach notification time yet: nothing can happen
+            # until then, so poll again shortly before it (capped so seeks
+            # are still noticed within about 10 seconds)
+            remaining = total_time - play_time - notification_time
+            self._poll_delay = min(10, max(1, remaining))
             return
 
         if is_repeat_one():

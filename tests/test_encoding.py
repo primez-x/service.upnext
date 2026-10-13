@@ -51,6 +51,11 @@ class TestEncoding(unittest.TestCase):
         self.assertEqual(decoded_data, data)
         self.assertEqual(encoding, 'base64')
 
+    def test_malformed_payloads_decode_as_none(self):
+        # Provider payloads are untrusted: decode_json must not raise
+        for payload in ('not json', '', '[]', '["!!!"]', '["a"]', '[1]', 'null'):
+            self.assertEqual(utils.decode_json(payload), (None, None))
+
     def test_from_addon_signals(self):
         data = 'Fòöbàr'
 

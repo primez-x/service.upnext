@@ -39,14 +39,21 @@ class UpNext(WindowXMLDialog):
             self.getControl(3013).setLabel(localize(30034))  # Close
 
     def set_info(self):
-        episode_info = '{season}x{episode}.'.format(**self.item)
-        if self.item.get('rating') is None:
+        # Provider-supplied items may omit season/episode/art; never let
+        # incomplete data crash the popup
+        item = self.item or {}
+        episode_info = '{season}x{episode}.'.format(
+            season=item.get('season', ''), episode=item.get('episode', ''))
+        if item.get('rating') is None:
             rating = ''
         else:
-            rating = str(round(float(self.item.get('rating')), 1))
+            try:
+                rating = str(round(float(item.get('rating')), 1))
+            except (TypeError, ValueError):
+                rating = ''
 
         if self.item is not None:
-            art = self.item.get('art')
+            art = item.get('art') or {}
             self.setProperty('fanart', art.get('tvshow.fanart', ''))
             self.setProperty('landscape', art.get('tvshow.landscape', ''))
             self.setProperty('clearart', art.get('tvshow.clearart', ''))
@@ -78,19 +85,28 @@ class UpNext(WindowXMLDialog):
     def set_progress_step_size(self, progress_step_size):
         self.progress_step_size = progress_step_size
 
-    def update_progress_control(self, remaining=None, runtime=None):
-        self.current_progress_percent = self.current_progress_percent - self.progress_step_size
-        try:
-            self.progress_control = self.getControl(3014)
-        except RuntimeError:  # Occurs when skin does not include progress control
-            pass
+    def update_progress_control(self, remaining=None, runtime=None, period=None):
+        if remaining is not None and period:
+            # From the real time left, so slow ticks and seeks inside the
+            # window don't make the bar drift from the countdown
+            self.current_progress_percent = min(100.0, max(0.0, 100.0 * remaining / period))
         else:
+            self.current_progress_percent = max(0.0, self.current_progress_percent - self.progress_step_size)
+        if self.progress_control is None:
+            self.prepare_progress_control()
+        if self.progress_control is not None:
             self.progress_control.setPercent(self.current_progress_percent)  # pylint: disable=no-member,useless-suppression
 
-        if remaining:
-            self.setProperty('remaining', from_unicode('%02d' % remaining))
+        if remaining is not None:
+            remaining_text = '%02d' % remaining
+            if remaining_text != getattr(self, '_last_remaining_text', None):
+                self._last_remaining_text = remaining_text
+                self.setProperty('remaining', from_unicode(remaining_text))
         if runtime:
-            self.setProperty('endtime', from_unicode(localize_time(datetime.now() + timedelta(seconds=runtime))))
+            endtime_text = localize_time(datetime.now() + timedelta(seconds=runtime))
+            if endtime_text != getattr(self, '_last_endtime_text', None):
+                self._last_endtime_text = endtime_text
+                self.setProperty('endtime', from_unicode(endtime_text))
 
     def set_cancel(self, cancel):
         self.cancel = cancel
