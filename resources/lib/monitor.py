@@ -165,7 +165,7 @@ class UpNextMonitor(Monitor):
 
         decoded_data, encoding = decode_json(data)
         if decoded_data is None:
-            self.log('Received data from sender %s is not JSON: %s', 2, sender, data)
+            self.log('Received data from sender %s is not JSON', 2, sender)
             return
 
         self.playback_manager.handle_demo()

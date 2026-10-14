@@ -44,8 +44,8 @@ class PlaybackManager(object):
             try:
                 total_time = self.player.getTotalTime()
                 self.player.seekTime(total_time - 15)
-            except RuntimeError as exc:
-                self.log('Failed to seekTime(): %s', 0, exc)
+            except RuntimeError as error:
+                self.log('Failed to seekTime() in DEMO mode: %s', 0, type(error).__name__)
         else:
             self.demo.hide()
 
@@ -65,7 +65,7 @@ class PlaybackManager(object):
             # No episode get out of here
             self.log('Error: no episode could be found to play next...exiting', 1)
             return False
-        self.log('episode details %s', 2, episode)
+        self.log('next episode found', 2)
         self.state.ended_during_popup = False
         try:
             play_next, keep_playing = self.launch_popup(episode, source)
