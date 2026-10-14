@@ -2,7 +2,7 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-from xbmc import Monitor, PlayList, PLAYLIST_VIDEO, PLAYLIST_MUSIC
+from xbmc import Monitor, PLAYLIST_VIDEO, PLAYLIST_MUSIC
 from utils import event, get_int, get_setting_bool, get_setting_int, jsonrpc, log as ulog
 
 
@@ -11,8 +11,8 @@ class Api:  # pylint: disable=too-many-public-methods
     _shared_state = {}
     _playerid_cache = None
     _playlistid_cache = None
-    # Playlist position of the item added by queue_next_item()
-    queued_position = None
+    # Playlist ID and identity of the confirmed add-on-owned entry.
+    queued_item = None
 
     PLAYER_PLAYLIST = {
         'video': PLAYLIST_VIDEO,  # 1
@@ -98,49 +98,103 @@ class Api:  # pylint: disable=too-many-public-methods
 
         return Api._playlistid_cache
 
+    @staticmethod
+    def _queue_playlist_items(playlistid):
+        """Read a complete playlist snapshot, or None when the RPC fails."""
+        try:
+            response = jsonrpc(method='Playlist.GetItems', params={
+                'playlistid': playlistid,
+                'properties': ['file'],
+            })
+        except (RuntimeError, TypeError, ValueError):
+            return None
+        if not isinstance(response, dict) or 'error' in response:
+            return None
+        result = response.get('result')
+        if not isinstance(result, dict):
+            return None
+        items = result.get('items', [])
+        limits = result.get('limits')
+        if (not isinstance(items, list) or not isinstance(limits, dict)
+                or not all(isinstance(item, dict) for item in items)
+                or limits.get('start') != 0 or limits.get('end') != len(items)
+                or limits.get('total') != len(items)):
+            return None
+        return items
+
+    @staticmethod
+    def _queue_item_positions(items, identity):
+        """Find entries with the requested file or library type and ID."""
+        if items is None:
+            return []
+        kind, value = identity
+        return [
+            position for position, item in enumerate(items)
+            if (item.get('file') == value if kind == 'file'
+                else item.get('type') == kind and item.get('id') == value)
+        ]
+
     def queue_next_item(self, episode):
+        self.queued_item = None
         next_item = {}
         if not self.data:
             episodeid = episode.get('episodeid')
             if episodeid in (None, -1):
                 self.log('Not queueing next episode without a valid episodeid', 1)
                 return False
+            identity = ('episode', episodeid)
             next_item.update(episodeid=episodeid)
         elif self.data.get('play_url'):
-            next_item.update(file=self.data.get('play_url'))
+            identity = ('file', self.data['play_url'])
+            next_item.update(file=self.data['play_url'])
 
-        if next_item:
-            playlistid = Api.get_playlistid()
-            # Playlist.Add appends: remember where, the current item is not
-            # always at position 0 (e.g. the last item of a season playlist)
-            position = PlayList(playlistid).size()
+        if not next_item:
+            return False
+        playlistid = Api.get_playlistid()
+        before = self._queue_playlist_items(playlistid)
+        if before is None:
+            return False
+        try:
             result = jsonrpc(
                 method='Playlist.Add',
                 id=0,
                 params={
                     'playlistid': playlistid,
-                    'item': next_item
+                    'item': next_item,
                 }
             )
-            if result.get('error'):
-                return False
-            self.queued_position = position
-
-        return bool(next_item)
+        except (RuntimeError, TypeError, ValueError):
+            return False
+        if not isinstance(result, dict) or 'error' in result or result.get('result') != 'OK':
+            return False
+        after = self._queue_playlist_items(playlistid)
+        # A pre-existing duplicate remains ambiguous even after another copy disappears.
+        if (not self._queue_item_positions(before, identity)
+                and len(self._queue_item_positions(after, identity)) == 1):
+            self.queued_item = (playlistid, identity)
+        return True
 
     def dequeue_next_item(self):
-        """Remove unplayed next item from video playlist"""
-        position, self.queued_position = self.queued_position, None
-        if position is None:
+        """Remove only the uniquely identified entry from the original playlist."""
+        queued_item, self.queued_item = self.queued_item, None
+        if queued_item is None:
             return False
-        jsonrpc(
-            method='Playlist.Remove',
-            id=0,
-            params={
-                'playlistid': Api.get_playlistid(),
-                'position': position
-            }
-        )
+        playlistid, identity = queued_item
+        items = self._queue_playlist_items(playlistid)
+        positions = self._queue_item_positions(items, identity)
+        if len(positions) != 1:
+            return False
+        try:
+            jsonrpc(
+                method='Playlist.Remove',
+                id=0,
+                params={
+                    'playlistid': playlistid,
+                    'position': positions[0],
+                }
+            )
+        except (RuntimeError, TypeError, ValueError):
+            pass
         return False
 
     @staticmethod

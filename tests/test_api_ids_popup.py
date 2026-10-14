@@ -13,7 +13,7 @@ from upnext import UpNext
 def make_api(monkeypatch, calls):
     Api._shared_state.clear()
     Api.clear_caches()
-    Api.queued_position = None
+    Api.queued_item = None
 
     def fake_jsonrpc(method=None, id=None, params=None, **_kwargs):  # pylint: disable=redefined-builtin
         calls.append(method)
