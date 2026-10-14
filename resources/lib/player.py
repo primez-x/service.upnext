@@ -71,6 +71,7 @@ class UpNextPlayer(Player):
         self.state.playing_next = False
         # A file started from a paused popup plays without onPlayBackResumed
         self.state.pause = False
+        self.state.demo_file = None
         # Settings read every service tick are cached per playback
         clear_setting_cache()
         self.video_check_at = time() + VIDEO_CHECK_DELAY
@@ -99,7 +100,7 @@ class UpNextPlayer(Player):
         """Will be called when user stops playing a file"""
         self.reset_queue()
         self.api.reset_addon_data()
-        self.state = State()  # Reset state
+        self.state.reset()
 
     def onPlayBackEnded(self):  # pylint: disable=invalid-name
         """Will be called when Kodi has ended playing a file"""
@@ -113,10 +114,10 @@ class UpNextPlayer(Player):
         # Only reset state if not playing the next episode
         if not self.state.playing_next:
             self.api.reset_addon_data()
-            self.state = State()  # Reset state
+            self.state.reset()
 
     def onPlayBackError(self):  # pylint: disable=invalid-name
         """Will be called when when playback stops due to an error"""
         self.reset_queue()
         self.api.reset_addon_data()
-        self.state = State()  # Reset state
+        self.state.reset()

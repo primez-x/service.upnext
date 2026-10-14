@@ -37,16 +37,19 @@ class PlaybackManager(object):
     def log(self, msg, level=2, *args):  # pylint: disable=keyword-arg-before-vararg
         ulog(msg, *args, name=self.__class__.__name__, level=level)
 
-    def handle_demo(self):
+    def handle_demo(self, current_file, total_time):
         if get_setting_bool('enableDemoMode'):
+            if self.state.demo_file == current_file:
+                return
+            self.state.demo_file = current_file
             self.log('Up Next DEMO mode enabled, skipping automatically to the end', 0)
             self.demo.show()
             try:
-                total_time = self.player.getTotalTime()
-                self.player.seekTime(total_time - 15)
+                self.player.seekTime(max(0, total_time - 15))
             except RuntimeError as error:
                 self.log('Failed to seekTime() in DEMO mode: %s', 0, type(error).__name__)
         else:
+            self.state.demo_file = None
             self.demo.hide()
 
     def launch_up_next(self):
@@ -102,7 +105,7 @@ class PlaybackManager(object):
         self.api.reset_addon_data()
         if self.state.ended_during_popup and not play_next:
             # onPlayBackEnded left the state to us: reset it as it would have
-            self.state.__init__()
+            self.state.reset()
         return False
 
     def launch_popup(self, episode, source=None):  # pylint: disable=too-many-locals
@@ -177,6 +180,10 @@ class PlaybackManager(object):
             )
 
         self.log('playing media episode', 2)
+        if next_up_page.is_watch_now() or still_watching_page.is_still_watching():
+            self.state.played_in_a_row = 1
+        else:
+            self.state.played_in_a_row += 1
         # Signal to trakt previous episode watched
         event(message='NEXTUPWATCHEDSIGNAL', data={'episodeid': self.state.current_episode_id}, encoding='base64')
         # Set before starting the next file, it is cleared when the next file
@@ -394,9 +401,5 @@ class PlaybackManager(object):
             # FIXME: This is a workaround until we handle this better (see comments in #142)
             return False, False
 
-        if next_up_page.is_watch_now() or still_watching_page.is_still_watching():
-            self.state.played_in_a_row = 1
-        else:
-            self.state.played_in_a_row += 1
         clear_property('service.upnext.dialog')
         return should_play_default, should_play_non_default

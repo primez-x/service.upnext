@@ -5,9 +5,16 @@
 
 from __future__ import absolute_import, division, unicode_literals
 
+import pytest
+import state as state_module
 from api import Api
 from player import UpNextPlayer
 from state import State
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(monkeypatch):
+    monkeypatch.setattr(State, '_shared_state', {})
 
 
 class NoWaitMonitor:
@@ -78,7 +85,6 @@ def test_playing_next_is_cleared_when_next_file_starts():
 
     start_next_file(player)
 
-    # NOTE: Don't create State() here, that resets the shared state
     assert player.state.playing_next is False
     assert player.state.track is True
 
@@ -113,3 +119,39 @@ def test_series_finale_end_resets_state_after_handoff():
     assert player.state.played_in_a_row == 1
     assert player.state.playing_next is False
     assert not api.has_addon_data()
+
+
+def test_incidental_state_construction_preserves_live_playback():
+    state = State()
+    state.track = state.pause = state.playing_next = True
+    state.played_in_a_row = 3
+    state.current_episode_id = 42
+    state.last_file = 'current.mkv'
+    other = State()
+    assert other.track and other.pause and other.playing_next
+    assert other.played_in_a_row == 3
+    assert other.current_episode_id == 42
+    assert other.last_file == 'current.mkv'
+
+
+def test_explicit_reset_refreshes_settings_for_all_consumers(monkeypatch):
+    monkeypatch.setattr(state_module, 'get_setting_int', lambda setting: 0)
+    monkeypatch.setattr(state_module, 'get_setting_bool', lambda setting: False)
+    state = State()
+    state.track = True
+    state.played_in_a_row = 4
+    monkeypatch.setattr(state_module, 'get_setting_int', lambda setting: 1)
+    monkeypatch.setattr(state_module, 'get_setting_bool', lambda setting: True)
+    other = State()
+    assert other.play_mode == 0
+    state.reset()
+    assert other.play_mode == 1 and other.include_watched
+    assert not other.track
+    assert other.played_in_a_row == 1
+
+
+def test_new_file_allows_demo_seek_again():
+    player = player_without_waiting()
+    player.state.demo_file = 'same.mkv'
+    start_next_file(player)
+    assert player.state.demo_file is None

@@ -3,6 +3,7 @@
 
 from __future__ import absolute_import, division, unicode_literals
 
+import pytest
 import playbackmanager
 from api import Api
 from playbackmanager import PlaybackManager
@@ -62,6 +63,9 @@ def manager_with_recorders(has_addon_data=False, notification_duration=None,
                            notification_time=120):
     manager = PlaybackManager.__new__(PlaybackManager)
     manager.player = RecordingPlayer()
+    manager.demo = type('Demo', (), {
+        'show': lambda self: None, 'hide': lambda self: None,
+    })()
     manager.api = RecordingApi(
         has_addon_data=has_addon_data,
         notification_duration=notification_duration,
@@ -70,6 +74,7 @@ def manager_with_recorders(has_addon_data=False, notification_duration=None,
     manager.state = type('RecordingState', (object,), {
         'playing_next': False,
         'queued': True,
+        'played_in_a_row': 1,
     })()
     return manager
 
@@ -558,7 +563,10 @@ def _manager_for_launch(monkeypatch, popup_result, on_popup=None):
 
     class ResettableState(object):
         def __init__(self):
-            self.resets = getattr(self, 'resets', -1) + 1
+            self.resets = 0
+
+        def reset(self):
+            self.resets += 1
 
     manager = manager_with_recorders()
     manager.player = SeekablePlayer([170])
@@ -631,6 +639,7 @@ def test_monitor_keeps_tracking_when_up_next_rearms(monkeypatch):
     })()
     service.playback_manager = type('M', (object,), {
         'launch_up_next': lambda self: calls.append('launch') or True,
+        'handle_demo': lambda self, current_file, total_time: None,
     })()
 
     service._check_playback()
@@ -879,3 +888,98 @@ def test_playing_popup_keeps_fast_polling(monkeypatch):
 
     assert sleeps == [100, 100]
     assert monitor.timeouts == []
+
+
+@pytest.mark.parametrize('mode,cancel,watch_now,still_confirm,show_still,expired,track,expected_count,plays', [
+    (0, True, False, False, False, False, True, 2, False),
+    (1, False, False, False, False, True, True, 2, False),
+    (1, False, False, False, False, False, True, 2, False),
+    (0, False, False, False, False, False, False, 2, False),
+    (0, False, False, False, False, False, True, 3, True),
+    (1, False, True, False, False, False, True, 1, True),
+    (0, False, False, True, True, False, True, 1, True),
+    (1, False, False, True, True, False, True, 1, True),
+    (0, True, False, False, True, False, True, 2, False),
+])
+def test_binge_count_changes_only_for_next_episode_path(
+        monkeypatch, mode, cancel, watch_now, still_confirm, show_still, expired,
+        track, expected_count, plays):
+    next_page, still_page = RecordingPage(), RecordingPage()
+    next_page.is_cancel = lambda: cancel
+    next_page.is_watch_now = lambda: watch_now
+    still_page.is_cancel = lambda: cancel
+    still_page.is_still_watching = lambda: still_confirm
+    monkeypatch.setattr(playbackmanager, 'get_setting_int', lambda setting: 1)
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: False)
+    monkeypatch.setattr(playbackmanager, 'event', lambda **kwargs: None)
+    monkeypatch.setattr(playbackmanager, 'UpNext', lambda *args: next_page)
+    monkeypatch.setattr(playbackmanager, 'StillWatching', lambda *args: still_page)
+    monkeypatch.setattr(playbackmanager, 'clear_property', lambda key: None)
+    manager = manager_with_recorders()
+    manager.state.include_watched = False
+    manager.state.current_episode_id = 1
+    manager.state.track = track
+    manager.state.play_mode = mode
+    manager.state.played_in_a_row = 2
+    manager.show_popup_and_wait = lambda *args: (not show_still, show_still, expired, False)
+    result = manager.launch_popup({'episodeid': 2, 'playcount': 0})
+    assert result[0] is plays
+    assert manager.state.played_in_a_row == expected_count
+    assert manager.player.playnext_calls == (1 if watch_now or still_confirm else 0)
+
+
+def test_demo_seek_runs_once_per_file_and_clamps_short_files(monkeypatch):
+    from types import SimpleNamespace
+    from state import State
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: True)
+    monkeypatch.setattr(State, '_shared_state', {})
+    manager = manager_with_recorders()
+    manager.state = State()
+    seeks, shown = [], []
+    manager.player.seekTime = seeks.append
+    manager.demo = SimpleNamespace(show=lambda: shown.append(True), hide=lambda: None)
+    manager.handle_demo('first.mkv', 10)
+    manager.handle_demo('first.mkv', 10)
+    manager.handle_demo('second.mkv', 200)
+    assert seeks == [0, 185]
+    assert shown == [True, True]
+
+
+def test_demo_seek_error_does_not_repeat_each_tick(monkeypatch):
+    from types import SimpleNamespace
+    from state import State
+    monkeypatch.setattr(playbackmanager, 'get_setting_bool', lambda setting: True)
+    monkeypatch.setattr(State, '_shared_state', {})
+    manager = manager_with_recorders()
+    manager.state = State()
+    attempts = []
+    def failed_seek(target):
+        attempts.append(target)
+        raise RuntimeError('seek unavailable')
+    manager.player.seekTime = failed_seek
+    manager.demo = SimpleNamespace(show=lambda: None, hide=lambda: None)
+    manager.handle_demo('first.mkv', 200)
+    manager.handle_demo('first.mkv', 200)
+    assert attempts == [185]
+
+
+def test_library_playback_runs_demo_before_notification_window(monkeypatch):
+    from types import SimpleNamespace
+    import monitor as monitor_module
+    from player import UpNextPlayer
+    monkeypatch.setattr(monitor_module, 'get_property', lambda key: '')
+    monkeypatch.setattr(monitor_module, 'get_setting_bool', lambda *args, **kwargs: False)
+    service = monitor_module.UpNextMonitor.__new__(monitor_module.UpNextMonitor)
+    player = UpNextPlayer()
+    player.enable_tracking()
+    player.set_last_file(None)
+    player.isExternalPlayer = lambda: False
+    player.getPlayingFile = lambda: 'library.mkv'
+    player.getTime = lambda: 10
+    player.getTotalTime = lambda: 200
+    calls = []
+    service.player = player
+    service.api = SimpleNamespace(notification_time=lambda **kwargs: 30)
+    service.playback_manager = SimpleNamespace(handle_demo=lambda *args: calls.append(args))
+    service._check_playback()
+    assert calls == [('library.mkv', 200)]

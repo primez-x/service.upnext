@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from platform import machine
 from xbmcgui import WindowXMLDialog
 from statichelper import from_unicode
-from utils import localize_date, localize_time
+from upnext import focus_default_control
+from utils import get_setting_int, localize_date, localize_time
 
 ACTION_PLAYER_STOP = 13
 ACTION_NAV_BACK = 92
@@ -32,6 +33,7 @@ class StillWatching(WindowXMLDialog):
     def onInit(self):  # pylint: disable=invalid-name
         self.set_info()
         self.prepare_progress_control()
+        focus_default_control(self, get_setting_int('autoPlayMode'))
 
     def set_info(self):
         # Provider-supplied items may omit season/episode/art; never let

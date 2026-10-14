@@ -124,6 +124,8 @@ class UpNextMonitor(Monitor):
             self.playback_manager.demo.hide()
             return
 
+        self.playback_manager.handle_demo(current_file, total_time)
+
         try:
             play_time = self.player.getTime()
         except RuntimeError:
@@ -168,7 +170,6 @@ class UpNextMonitor(Monitor):
             self.log('Received data from sender %s is not JSON', 2, sender)
             return
 
-        self.playback_manager.handle_demo()
         decoded_data.update(id='%s_play_action' % sender.replace('.SIGNAL', ''))
         self.api.addon_data_received(decoded_data, encoding=encoding)
         self.player.enable_tracking()

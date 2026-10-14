@@ -7,11 +7,29 @@ from platform import machine
 from xbmc import Player
 from xbmcgui import WindowXMLDialog
 from statichelper import from_unicode
-from utils import get_setting_bool, localize, localize_date, localize_time
+from utils import get_setting_bool, get_setting_int, localize, localize_date, localize_time
 
 ACTION_PLAYER_STOP = 13
 ACTION_NAV_BACK = 92
 OS_MACHINE = machine()
+
+
+def focus_default_control(dialog, play_mode):
+    """Focus the configured action across button and grouplist layouts."""
+    try:
+        if play_mode == 1:
+            control = dialog.getControl(3013)
+        else:
+            try:
+                control = dialog.getControl(20)
+            except RuntimeError:
+                control = dialog.getControl(3012)
+        dialog.setFocus(control)
+    except RuntimeError:
+        if play_mode == 1:
+            # A skin without a safe cancel control must not default to Watch Now.
+            dialog.cancel = True
+            dialog.close()
 
 
 class UpNext(WindowXMLDialog):
@@ -33,10 +51,12 @@ class UpNext(WindowXMLDialog):
         self.set_info()
         self.prepare_progress_control()
 
-        if get_setting_bool('stopAfterClose'):
-            self.getControl(3013).setLabel(localize(30033))  # Stop
-        else:
-            self.getControl(3013).setLabel(localize(30034))  # Close
+        try:
+            self.getControl(3013).setLabel(localize(
+                30033 if get_setting_bool('stopAfterClose') else 30034))
+        except RuntimeError:  # A skin can omit the close control.
+            pass
+        focus_default_control(self, get_setting_int('autoPlayMode'))
 
     def set_info(self):
         # Provider-supplied items may omit season/episode/art; never let

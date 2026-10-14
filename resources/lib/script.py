@@ -8,7 +8,8 @@ from math import ceil
 from xbmc import Monitor
 from xbmcgui import WindowXMLDialog
 from statichelper import from_unicode
-from utils import addon_path, get_setting_bool, localize, localize_time
+from upnext import focus_default_control
+from utils import addon_path, get_setting_bool, get_setting_int, localize, localize_time
 
 
 class TestPopup(WindowXMLDialog):
@@ -23,10 +24,12 @@ class TestPopup(WindowXMLDialog):
         self.set_info()
         self.prepare_progress_control()
 
-        if get_setting_bool('stopAfterClose'):
-            self.getControl(3013).setLabel(localize(30033))  # Stop
-        else:
-            self.getControl(3013).setLabel(localize(30034))  # Close
+        try:
+            self.getControl(3013).setLabel(localize(
+                30033 if get_setting_bool('stopAfterClose') else 30034))
+        except RuntimeError:  # A skin can omit the close control.
+            pass
+        focus_default_control(self, get_setting_int('autoPlayMode'))
 
     def set_info(self):
         self.setProperty('clearart', 'https://fanart.tv/fanart/tv/121361/clearart/game-of-thrones-4fa1349588447.png')

@@ -11,6 +11,11 @@ class State:
 
     def __init__(self):
         self.__dict__ = self._shared_state
+        if not self._shared_state:
+            self.reset()
+
+    def reset(self):
+        """Clear playback state and refresh playback settings."""
         self.play_mode = get_setting_int('autoPlayMode')
         self.include_watched = get_setting_bool('includeWatched')
         self.current_tv_show_id = None
@@ -18,6 +23,7 @@ class State:
         self.tv_show_id = None
         self.played_in_a_row = 1
         self.last_file = None
+        self.demo_file = None
         self.track = False
         self.pause = False
         self.queued = False
