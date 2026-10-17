@@ -29,5 +29,8 @@ def test_service():
         test_complete = True
     except ImportError:
         test_complete = False
+    finally:
+        abort_timer.cancel()
+        import_module('playbackmanager').PlaybackManager._shared_state.clear()
 
     assert test_complete is True
