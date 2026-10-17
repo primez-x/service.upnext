@@ -184,7 +184,7 @@ class PlaybackManager(object):
             self.state.played_in_a_row = 1
         else:
             self.state.played_in_a_row += 1
-        # Signal to trakt previous episode watched
+        # Notify integrations that the previous episode was watched.
         event(message='NEXTUPWATCHEDSIGNAL', data={'episodeid': self.state.current_episode_id}, encoding='base64')
         # Set before starting the next file, it is cleared when the next file
         # starts (UpNextPlayer) or the state is reset (playback stopped/failed)
