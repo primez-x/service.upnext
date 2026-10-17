@@ -18,7 +18,7 @@ SEEK_BACK_GRACE = 5
 PAUSED_INTERVAL_S = 0.5
 
 
-class PlaybackManager(object):
+class PlaybackManager:
     _shared_state = {}
     # Popup dialogs currently shown, see close_popup()
     open_pages = ()
@@ -239,13 +239,12 @@ class PlaybackManager(object):
                     return
                 if not self.player.isPlaying():
                     break
-            if current_file:
-                try:
-                    if self.player.getPlayingFile() != current_file:
-                        self.log('Kodi completed watched episode handoff natively', 0)
-                        return
-                except RuntimeError:
-                    break
+            try:
+                if current_file and self.player.getPlayingFile() != current_file:
+                    self.log('Kodi completed watched episode handoff natively', 0)
+                    return
+            except RuntimeError:
+                break
             if self._wait_for_abort(0.05):
                 return
 

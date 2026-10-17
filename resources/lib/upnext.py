@@ -42,6 +42,8 @@ class UpNext(WindowXMLDialog):
     def __init__(self, *args, **kwargs):
         self.action_exitkeys_id = [10, 13]
         self.progress_control = None
+        self._last_remaining_text = None
+        self._last_endtime_text = None
         if OS_MACHINE[0:5] == 'armv7':
             WindowXMLDialog.__init__(self)
         else:

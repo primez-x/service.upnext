@@ -116,8 +116,9 @@ class Api:  # pylint: disable=too-many-public-methods
         items = result.get('items', [])
         limits = result.get('limits')
         if (not isinstance(items, list) or not isinstance(limits, dict)
-                or not all(isinstance(item, dict) for item in items)
-                or limits.get('start') != 0 or limits.get('end') != len(items)
+                or not all(isinstance(item, dict) for item in items)):
+            return None
+        if (limits.get('start') != 0 or limits.get('end') != len(items)
                 or limits.get('total') != len(items)):
             return None
         return items
@@ -147,8 +148,7 @@ class Api:  # pylint: disable=too-many-public-methods
         elif self.data.get('play_url'):
             identity = ('file', self.data['play_url'])
             next_item.update(file=self.data['play_url'])
-
-        if not next_item:
+        else:
             return False
         playlistid = Api.get_playlistid()
         before = self._queue_playlist_items(playlistid)

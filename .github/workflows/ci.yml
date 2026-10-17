@@ -2,62 +2,48 @@ name: CI
 on:
 - pull_request
 - push
+permissions:
+  contents: read
 jobs:
   tests:
-    name: Add-on testing
-    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
     env:
       PYTHONIOENCODING: utf-8
       PYTHONPATH: ${{ github.workspace }}/resources/lib:${{ github.workspace }}/tests
-      TESTS_ENABLED: 'pypy2.7, 3.8, 3.11'
     strategy:
       fail-fast: false
       matrix:
-        python-version: [pypy2.7, 3.7, 3.8, 3.9, '3.10', 3.11]
+        python-version: ['3.8', '3.11', '3.12']
     steps:
-    - name: Check out ${{ github.sha }} from repository ${{ github.repository }}
-      uses: actions/checkout@v3
+    - name: Check out source
+      uses: actions/checkout@v7
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        sudo apt-get install gettext
+        sudo apt-get update
+        sudo apt-get install -y gettext
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    - name: Run tox
-      run: python -m tox -q -e flake8,py
-      if: always()
+        python -m pip install -r requirements.txt
+    - name: Run flake8
+      run: python -m tox -q -e flake8
     - name: Run pylint
       run: python -m pylint resources/lib/
-      if: always()
     - name: Compare translations
-      run: make check-translations
-      if: always()
+      run: |
+        for translation in resources/language/resource.language.*/strings.po; do
+          if [[ "$translation" != resources/language/resource.language.en_gb/strings.po ]]; then
+            msgcmp --use-untranslated "$translation" resources/language/resource.language.en_gb/strings.po
+          fi
+        done
     - name: Run pytest
-      if: contains(env.TESTS_ENABLED, matrix.python-version)
-      run: pytest --log-cli-level=INFO
-      continue-on-error: true
-    - name: Upload code coverage to CodeCov
-      if: contains(env.TESTS_ENABLED, matrix.python-version)
-      uses: codecov/codecov-action@v3
-      continue-on-error: true
-    - name: Fix coverage.xml source path
-      if: contains(env.TESTS_ENABLED, matrix.python-version)
-      run: sed -i 's@'$GITHUB_WORKSPACE'@/github/workspace/@g' coverage.xml
-      continue-on-error: true
-    - name: Analyze with SonarCloud
-      if: contains(env.TESTS_ENABLED, matrix.python-version)
-      uses: SonarSource/sonarcloud-github-action@master
+      run: python -m pytest --log-cli-level=INFO
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v7
       with:
-        args: >
-          -Dsonar.organization=im85288
-          -Dsonar.projectKey=im85288_service.upnext
-          -Dsonar.sources=resources/lib/
-          -Dsonar.tests=tests/
-          -Dsonar.python.coverage.reportPaths=coverage.xml
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      continue-on-error: true
+        name: coverage-python-${{ matrix.python-version }}
+        path: coverage.xml
+        if-no-files-found: error

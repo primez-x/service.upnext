@@ -2,36 +2,31 @@ name: Kodi
 on:
 - pull_request
 - push
+permissions:
+  contents: read
 jobs:
   tests:
-    name: Addon checker
+    name: Add-on checker (${{ matrix.kodi-branch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        kodi-branch: [leia, matrix]
+        kodi-branch: [matrix, omega]
     steps:
-    - uses: actions/checkout@v2
+    - name: Check out source
+      uses: actions/checkout@v7
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v7
       with:
-        path: ${{ github.repository }}
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v1
-      with:
-        python-version: 3.9
+        python-version: '3.12'
     - name: Install dependencies
       run: |
-        sudo apt-get install xmlstarlet
-        python -m pip install --upgrade pip packaging
-        pip install kodi-addon-checker
-    - name: Remove unwanted files
-      run: awk '/export-ignore/ { print $1 }' .gitattributes | xargs rm -rf --
-      working-directory: ${{ github.repository }}
-    - name: Rewrite addon.xml for Matrix
+        python -m pip install --upgrade pip
+        python -m pip install kodi-addon-checker
+    - name: Export add-on package
+      shell: bash
       run: |
-        xmlstarlet ed -L -u '/addon/requires/import[@addon="xbmc.python"]/@version' -v "3.0.0" addon.xml
-        version=$(xmlstarlet sel -t -v 'string(/addon/@version)' addon.xml)
-        xmlstarlet ed -L -u '/addon/@version' -v "${version}+matrix.99" addon.xml
-      working-directory: ${{ github.repository }}
-      if: matrix.kodi-branch == 'matrix'
+        mkdir -p "$RUNNER_TEMP/package/service.upnext"
+        git archive HEAD | tar -x -C "$RUNNER_TEMP/package/service.upnext"
     - name: Run kodi-addon-checker
-      run: kodi-addon-checker --branch=${{ matrix.kodi-branch }} ${{ github.repository }}/
+      run: kodi-addon-checker --branch=${{ matrix.kodi-branch }} "$RUNNER_TEMP/package/service.upnext/"

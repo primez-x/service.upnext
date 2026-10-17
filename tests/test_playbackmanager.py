@@ -953,6 +953,7 @@ def test_demo_seek_error_does_not_repeat_each_tick(monkeypatch):
     manager = manager_with_recorders()
     manager.state = State()
     attempts = []
+
     def failed_seek(target):
         attempts.append(target)
         raise RuntimeError('seek unavailable')

@@ -1,5 +1,4 @@
-codecov
-kodi-addon-checker; python_version >= '3.7'
+kodi-addon-checker
 polib
 pylint
 tox
